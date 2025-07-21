@@ -1,10 +1,35 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
+"""
+This module contains the functions that are used to compute the MDP terms for the environment.
 
-"""This sub-module contains the functions that are specific to the environment."""
+The functions can be passed to the curriculum, observations, rewards and terminations managers.
+"""
 
-from isaaclab.envs.mdp import *  # noqa: F401, F403
+from isaaclab.assets import Articulation, ArticulationCfg
+from isaaclab.envs import ManagerBasedRLEnv
+# Import action functions from isaaclab
+from isaaclab.envs.mdp.actions import JointEffortActionCfg
+# Import command functions from isaaclab
+from isaaclab.envs.mdp.commands import UniformPoseCommandCfg
+# Import termination functions from isaaclab
+from isaaclab.envs.mdp.terminations import time_out
+# Import observation functions from isaaclab
+from isaaclab.envs.mdp.observations import (
+    ObservationTermCfg,
+    generated_commands,
+    joint_pos_rel,
+    joint_vel_rel,
+    last_action,
+)
+# Import manager term configs
+from isaaclab.managers import (
+    CurriculumTermCfg,
+    ObservationGroupCfg,
+    RewardTermCfg,
+    TerminationTermCfg,
+)
 
-from .rewards import *  # noqa: F401, F403
+from .cfg import *
+from .curriculums import *
+from .observations import *
+from .rewards import *
+from .terminations import *
