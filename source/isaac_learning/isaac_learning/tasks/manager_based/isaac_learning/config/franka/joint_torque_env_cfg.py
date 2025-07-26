@@ -14,6 +14,7 @@ from isaaclab.envs.mdp.actions import JointEffortActionCfg
 from isaaclab.utils import configclass
 
 from ...reach_env_cfg import ReachEnvCfg
+from ...logging_env import FrankaReachEnv  # for more detailed W&B logging
 from .franka_cfg import FRANKA_PANDA_CFG
 import math
 
@@ -21,6 +22,8 @@ import math
 @configclass
 class FrankaReachJointTorqueEnvCfg(ReachEnvCfg):
     """Configuration for the Franka reach environment with joint position control."""
+
+    _env_class = FrankaReachEnv
 
     def __post_init__(self):
         """Post-initialization checks."""
