@@ -17,68 +17,69 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import quat_inv, quat_mul
 
 
-def ee_pos_tracking_reward(env: ManagerBasedRLEnv, std: float, robot_cfg: SceneEntityCfg) -> torch.Tensor:
-    """Calculates the reward for end-effector position tracking.
-
-    This reward function encourages the robot's end-effector to stay close to the
-    target position. The reward is based on an exponential kernel, where the
-    distance between the current and target positions is penalized.
+def ee_pos_tracking_reward(
+    env: ManagerBasedRLEnv,
+    robot_cfg,            # SceneEntityCfg for the robot
+    weight: float = 1.0,  # scaling factor
+) -> torch.Tensor:
     """
-    robot: Articulation = env.scene[robot_cfg.name]
-    ee_goal = env.scene["ee_goal"]
-    ee_body_idx = robot_cfg.body_ids[0]
-
-    # Get current and target end-effector positions
-    ee_pos_w = robot.data.body_pos_w[:, ee_body_idx]
-    target_pos_w = ee_goal.data.target_pos_w[:, 0, :]
-
-    # Calculate the squared distance between current and target positions
-    pos_dist_sq = torch.sum((ee_pos_w - target_pos_w) ** 2, dim=1)
-
-    # Reward is based on an exponential kernel of the distance
-    return torch.exp(-pos_dist_sq / (std**2))
-
-
-def ee_quat_tracking_reward(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg) -> torch.Tensor:
-    """Calculates the reward for end-effector orientation tracking.
-
-    This function rewards the robot for aligning its end-effector orientation
-    with the target orientation.
+    Continuous position‐tracking reward:
+      reward = -weight * ||ee_pos - goal_pos||_2
+    where goal_pos is fetched from the command manager under "goal_pose".
     """
-    robot: Articulation = env.scene[robot_cfg.name]
-    ee_goal = env.scene["ee_goal"]
-    ee_body_idx = robot_cfg.body_ids[0]
+    # 1. Lookup the robot articulation by its config name ("robot")
+    robot = env.scene[robot_cfg.name]
 
-    # Get current and target end-effector orientations
-    ee_quat_w = robot.data.body_quat_w[:, ee_body_idx]
-    target_quat_w = ee_goal.data.target_quat_w[:, 0, :]
+    # 2. Extract end‐effector world position (num_envs, 3)
+    ee_index = robot.body_names.index("panda_hand")
+    ee_pos = robot.data.body_pos_w[:, ee_index]  # (N,3)
 
-    # Compute the orientation error
-    quat_error = quat_mul(target_quat_w, quat_inv(ee_quat_w))
-    # The error is the angle part of the quaternion, which is related to the x,y,z components
-    # A dot product formulation is common here: (q1 . q2)^2
-    dot_product = torch.sum(ee_quat_w * target_quat_w, dim=1)
-    return 2 * (dot_product**2) - 1
+    # 3. Fetch the goal pose command (num_envs, 7): [x,y,z, qx,qy,qz,qw]
+    goal_cmd = env.command_manager.get_command("goal_pose")
+    goal_pos = goal_cmd[..., :3]                   # (N,3)
+
+    # 4. Compute Euclidean error and scale
+    error = torch.norm(ee_pos - goal_pos, dim=1)  # (N,)
+    reward = -weight * error                       # (N,)
+
+    return reward
 
 
-def ee_stay_up_reward(env: ManagerBasedRLEnv, weight: float, robot_cfg: SceneEntityCfg) -> torch.Tensor:
+def ee_quat_tracking_reward(
+    env: ManagerBasedRLEnv,
+    robot_cfg: SceneEntityCfg
+) -> torch.Tensor:
     """
-    Rewards the robot for keeping its end-effector up.
-
-    This is particularly useful in torque control scenarios to counteract gravity.
-    The reward is proportional to the Z-coordinate of the end-effector.
-
-    Args:
-        env: The environment instance.
-        weight: The weight of the reward.
-        robot_cfg: The configuration object for the robot.
-
-    Returns:
-        A tensor of shape (num_envs,) containing the stay-up reward.
+    Reward for aligning the end‑effector orientation with the goal orientation.
+    Fetches the goal quaternion from the command manager under "goal_pose"
+    instead of looking for a nonexistent ee_goal scene entity.
+    Returns a tensor of shape (num_envs,).
     """
-    robot: Articulation = env.scene[robot_cfg.name]
-    ee_body_id = robot_cfg.body_ids[0]
-    ee_pos_z = robot.data.body_pos_w[:, ee_body_id, 2]
+    # 1. Lookup Articulation
+    robot = env.scene[robot_cfg.name]
+    ee_index = robot.body_names.index("panda_hand")
+    # 2. Current EE quaternion (world frame), shape (num_envs, 4)
+    ee_quat_w = robot.data.body_quat_w[:, ee_index, :]
+    # 3. Goal quaternion from command manager, shape (num_envs, 7) → slice to (num_envs, 4)
+    goal_cmd = env.command_manager.get_command("goal_pose")
+    target_quat_w = goal_cmd[..., 3:]  # (num_envs, 4)
+    # 4. Quaternion alignment reward: 2*(dot(q, q_goal)^2) - 1
+    dot_product = torch.sum(ee_quat_w * target_quat_w, dim=1).abs()
+    return 2.0 * (dot_product ** 2) - 1.0
+
+
+def ee_stay_up_reward(
+    env: ManagerBasedRLEnv,
+    weight: float,
+    robot_cfg: SceneEntityCfg
+) -> torch.Tensor:
+    """
+    Reward proportional to the Z‐coordinate of the end‑effector.
+    Encourages the arm to stay raised against gravity.
+    """
+    robot = env.scene[robot_cfg.name]
+    ee_index = robot.body_names.index("panda_hand")
+    ee_pos_z = robot.data.body_pos_w[:, ee_index, 2]  # (num_envs,)
     return weight * ee_pos_z
 
 
@@ -123,3 +124,42 @@ def action_smoothness_penalty(env: ManagerBasedRLEnv, weight: float) -> torch.Te
     actions = env.action_manager.action
     last_actions = env.action_manager.prev_action
     return weight * torch.sum(torch.square(actions - last_actions), dim=1)
+
+
+def success_bonus(env: ManagerBasedRLEnv, threshold: float) -> torch.Tensor:
+    """
+    Returns 1.0 for each environment where the end‑effector is within
+    `threshold` meters of the current goal position, else 0.0.
+
+    Fetches the goal position from the command manager under "goal_pose",
+    matching IsaacLab 2.2’s pattern for all goal‑driven terms.
+    """
+    # 1) Lookup the robot articulation
+    robot = env.scene["robot"]                    # single Articulation
+    ee_idx = robot.body_names.index("panda_hand")  # index of the end‑effector body
+    ee_pos = robot.data.body_pos_w[:, ee_idx]     # (num_envs, 3)
+
+    # 2) Fetch the goal pose command (UniformPoseCommandCfg)
+    #    Returns a tensor shape (num_envs, 7): [x, y, z, qx, qy, qz, qw]
+    goal_cmd = env.command_manager.get_command("goal_pose")
+    goal_pos = goal_cmd[..., :3]                  # (num_envs, 3)
+
+    # 3) Compute distance and apply threshold
+    dist = torch.norm(ee_pos - goal_pos, dim=1)   # (num_envs,)
+    return (dist < threshold).float()             # 1.0 where dist < threshold
+
+
+def collision_penalty(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """-1.0 if any contact detected, else 0.0."""
+
+    # Retrieve the ContactSensor instance by its config name
+    sensor = env.scene.sensors["contact_sensor"]
+    # net_forces_w has shape (num_envs, num_bodies, 3)
+    net_forces = sensor.data.net_forces_w
+    # Compute per-body force magnitudes: (num_envs, num_bodies)
+    magnitudes = torch.norm(net_forces, dim=-1)
+    # A collision occurred in an environment if any body force > 0
+    collided = magnitudes > 0.0
+    contacts = collided.any(dim=-1).float()
+    # Return a per-env mask
+    return -1.0 * contacts.to(env.device).float()

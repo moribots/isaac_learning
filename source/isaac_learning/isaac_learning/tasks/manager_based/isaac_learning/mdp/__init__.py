@@ -29,7 +29,6 @@ from isaaclab.managers import (
 )
 
 from .cfg import *
-from .curriculums import *
 from .observations import *
 from .rewards import *
 from .terminations import *

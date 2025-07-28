@@ -15,11 +15,11 @@ from isaaclab.managers import (
     ObservationGroupCfg,
     ObservationTermCfg,
     RewardTermCfg,
-    CommandTermCfg
+    CommandTermCfg,
+    SceneEntityCfg
 )
 
 # Import the local project modules
-from . import curriculums as curr_terms
 from . import observations, rewards, terminations
 
 ##
@@ -53,7 +53,7 @@ class RewardsCfg:
     """Reward terms for the MDP."""
 
     ee_pos_tracking_reward = RewardTermCfg(
-        func=rewards.ee_pos_tracking_reward, weight=1.0, params={"std": 0.1, "robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
+        func=rewards.ee_pos_tracking_reward, weight=1.0, params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
     )
     ee_quat_tracking_reward = RewardTermCfg(
         func=rewards.ee_quat_tracking_reward, weight=0.5, params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
@@ -72,6 +72,18 @@ class RewardsCfg:
     )
     action_smoothness_penalty = RewardTermCfg(
         func=rewards.action_smoothness_penalty, weight=0.0, params={"weight": 0.0}
+    )
+    # One‑time success bonus when goal reached
+    success_reward = RewardTermCfg(
+        func=rewards.success_bonus,
+        weight=200.0,
+        params={"threshold": 0.05}
+    )
+    # Penalty on any collision event
+    collision_penalty = RewardTermCfg(
+        func=rewards.collision_penalty,
+        weight=1.0,
+        params={}
     )
 
 
@@ -94,6 +106,14 @@ class TerminationsCfg:
 
         params={"robot_cfg": mdp.SceneEntityCfg("contact_sensor")}
     )
+    goal_reached = TerminationTermCfg(
+        func=terminations.goal_reached,
+        params={
+            "robot_cfg": SceneEntityCfg(name="robot", body_names=["panda_hand"]),
+            "position_threshold": 0.05,
+            "orientation_threshold": 0.10,   # radians
+        }
+    )
 
 
 ##
@@ -103,38 +123,8 @@ class TerminationsCfg:
 
 @configclass
 class CurriculumCfg:
-    """Curriculum terms for the MDP."""
-
-    ee_pos_reward_schedule = CurriculumTermCfg(
-        func=curr_terms.linear_interpolation,
-        params={
-            "address": "rewards.ee_pos_tracking.weight",
-            "start_value": 0.1,
-            "end_value": 1.0,
-            "start_step": 0,
-            "end_step": 25000,
-        },
-    )
-    ee_quat_reward_schedule = CurriculumTermCfg(
-        func=curr_terms.linear_interpolation,
-        params={
-            "address": "rewards.ee_quat_tracking.weight",
-            "start_value": 0.05,
-            "end_value": 0.5,
-            "start_step": 0,
-            "end_step": 25000,
-        },
-    )
-    action_smoothness_penalty_schedule = CurriculumTermCfg(
-        func=curr_terms.linear_interpolation,
-        params={
-            "address": "rewards.action_smoothness_penalty.weight",
-            "start_value": 0.0,
-            "end_value": -0.01,
-            "start_step": 0,
-            "end_step": 40000,
-        },
-    )
+    """Step‑based curricula disabled; runner will handle performance updates."""
+    pass
 
 
 ##

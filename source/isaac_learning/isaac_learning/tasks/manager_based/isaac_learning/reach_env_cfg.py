@@ -25,6 +25,8 @@ from .mdp.cfg import (
     TerminationsCfg,
 )
 
+import numpy as np
+
 ##
 # Scene
 ##
@@ -85,6 +87,20 @@ class ReachEnvCfg(ManagerBasedRLEnvCfg):
 
     # Curriculum settings
     curriculum: CurriculumCfg = CurriculumCfg()
+
+    # Uniform sampling ranges for goal and shelf poses
+    goal_pose_range = {
+        "x": [0.25, 0.6],
+        "y": [-0.3, 0.3],
+        "z": [0.25, 0.8],
+        "rpy": [(0.0, 0.0, 0.0)]
+    }
+    shelf_pose_range = {
+        "x": [0.4, 0.7],
+        "y": [-0.2, 0.2],
+        "z": [0.3, 0.6],
+        "rpy": [(0.0, 0.0, 0.0), (0.0, 0.0, np.pi / 2)]
+    }
 
     def __post_init__(self):
         """Post-initialization checks."""

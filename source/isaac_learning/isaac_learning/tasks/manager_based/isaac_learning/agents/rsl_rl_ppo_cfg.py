@@ -19,7 +19,8 @@ class RslRlPpoAgentCfg(RslRlOnPolicyRunnerCfg):
     experiment_name = "franka_trajectory_tracking"
     run_name = ""
     logger = "wandb"
-    wandb_entity = "moribots"  # Explicitly set the W&B entity
+    wandb_project = "isaac_learning"
+    wandb_entity = "moribots-personal"
 
     policy: RslRlPpoActorCriticCfg = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
