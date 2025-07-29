@@ -32,7 +32,7 @@ class FrankaReachJointTorqueEnvCfg(ReachEnvCfg):
 
         # Scene settings
         self.scene.robot = FRANKA_PANDA_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        self.scene.num_envs = 4
+        self.scene.num_envs = 4096
         self.scene.env_spacing = 2.5
 
         # Action settings
