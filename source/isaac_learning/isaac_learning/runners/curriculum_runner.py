@@ -8,6 +8,7 @@ class CurriculumRunner(OnPolicyRunner):
 
     def after_update(self, metrics: dict):
         super().after_update(metrics)
+        # Curriculum
         succ = metrics.get("train/is_success", 0.0)
         cm = self.task.env.curriculum_manager
         # tighten threshold as performance improves
@@ -20,3 +21,15 @@ class CurriculumRunner(OnPolicyRunner):
         # enable strong collision penalty once proficient
         if succ > 0.85:
             cm.set_env_param("rewards.collision_penalty.weight", -100.0)
+
+        # Logging.
+        try:
+            extras = self.task.env.get_attr("extras")[0]
+        except Exception:
+            return
+        import wandb
+        for key, val in extras.items():
+            if key.startswith("Rewards/") or key == "is_success":
+                wandb.log({f"train/{key}": val}, commit=False)
+        # commit all logs for this iteration
+        wandb.log({}, commit=True)

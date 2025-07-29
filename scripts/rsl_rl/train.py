@@ -15,12 +15,6 @@ from isaaclab.app import AppLauncher
 # local imports
 import cli_args  # isort: skip
 
-import wandb
-
-# ensure you are logged in and set correct entity/project
-wandb.login()
-wandb.init(entity="moribots-personal", project="isaac_learning")
-
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
@@ -43,6 +37,13 @@ args_cli, hydra_args = parser.parse_known_args()
 # always enable cameras to record video
 if args_cli.video:
     args_cli.enable_cameras = True
+
+from video_uploader import upload_videos_to_wandb
+import wandb
+
+# ensure you are logged in and set correct entity/project
+wandb.login()
+wandb.init(entity="moribots-personal", project="isaac_learning")
 
 # clear out sys.argv for Hydra
 sys.argv = [sys.argv[0]] + hydra_args
@@ -187,7 +188,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # run training
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
-
+    upload_videos_to_wandb(cfg)
     # close the simulator
     env.close()
 
