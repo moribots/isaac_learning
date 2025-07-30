@@ -11,54 +11,206 @@ from __future__ import annotations
 
 import torch
 
+
 from isaaclab.assets import Articulation
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.envs.mdp.rewards import undesired_contacts
+from isaaclab.envs.mdp.observations import joint_pos
+from isaaclab.envs.mdp.observations import joint_vel
+from isaaclab.envs.mdp.observations import joint_effort
 
-from ..config.franka.franka_cfg import FRANKA_JOINT_LIMITS_MAX, FRANKA_JOINT_LIMITS_MIN
+from ..config.franka.franka_cfg import *
+
+
+def _resolve_arm_joint_ids(env: ManagerBasedRLEnv, robot: Articulation, robot_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Return the 7 Franka arm joint indices as a LongTensor on env.device."""
+    if robot_cfg.joint_ids is not None and len(robot_cfg.joint_ids) == 7:
+        return torch.as_tensor(robot_cfg.joint_ids, device=env.device, dtype=torch.long)
+    # Fallback: resolve by regex against the articulation's actual joint names
+    ids, _ = robot.find_joints([r"panda_joint[1-7]"])
+    return torch.as_tensor(ids, device=env.device, dtype=torch.long)
+
+
+def _print_joint_limit_violations(
+    env: ManagerBasedRLEnv,
+    joint_pos: torch.Tensor,     # shape [num_envs, 7]
+    min_limits: torch.Tensor,    # shape [7,]
+    max_limits: torch.Tensor,    # shape [7,]
+    name: str                    # e.g. "Pos", "Vel", or "Torque"
+) -> None:
+    return
+    # find which entries violate
+    violated_min = (joint_pos < min_limits).nonzero(as_tuple=True)
+    violated_max = (joint_pos > max_limits).nonzero(as_tuple=True)
+
+    # for each violation, print an informative line
+    for idx in range(violated_min[0].shape[0]):
+        e = violated_min[0][idx].item()
+        j = violated_min[1][idx].item()
+        print(f"  Env {e}: Joint {j} violated {name} MIN limit. "
+              f"Value={joint_pos[e, j]:.4f}, Min={min_limits[j]:.4f}")
+    for idx in range(violated_max[0].shape[0]):
+        e = violated_max[0][idx].item()
+        j = violated_max[1][idx].item()
+        print(f"  Env {e}: Joint {j} violated {name} MAX limit. "
+              f"Value={joint_pos[e, j]:.4f}, Max={max_limits[j]:.4f}")
+
+
+def franka_joint_pos_limits(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Terminate per env if any Franka arm joint leaves its *soft* position limits."""
+    robot: Articulation = env.scene[robot_cfg.name]
+    arm_ids = _resolve_arm_joint_ids(env, robot, robot_cfg)
+
+    # Current joint positions for the 7 arm joints -> [N, 7]
+    q = robot.data.joint_pos[:, arm_ids]
+
+    # Soft position limits from the articulation data -> [N, 7, 2] (low, high)
+    q_lims = robot.data.soft_joint_pos_limits[:, arm_ids, :]
+    q_min = q_lims[0, :, 0]  # identical across envs; take env 0
+    q_max = q_lims[0, :, 1]
+
+    low = q < q_min.view(1, -1)
+    high = q > q_max.view(1, -1)
+    viol = low | high  # [N, 7]
+
+    if viol.any() and False:
+        # Optional: pretty print which joints/envs failed
+        names = [robot.data.joint_names[i] for i in arm_ids.tolist()]
+        env_ids = torch.nonzero(viol.any(dim=1), as_tuple=False).squeeze(1).tolist()
+        for e in env_ids:
+            which = torch.nonzero(viol[e], as_tuple=False).squeeze(1).tolist()
+            for j in which:
+                side = "MIN" if low[e, j] else "MAX"
+                print(f"Env {e}: {names[j]} POS {side}  q={q[e, j].item():.4f}  "
+                      f"range=[{q_min[j].item():.4f}, {q_max[j].item():.4f}]")
+    return viol.any(dim=1)
+
+
+def franka_joint_vel_limits(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Terminate per env if any Franka arm joint velocity exceeds its *soft* limits (symmetric)."""
+    robot: Articulation = env.scene[robot_cfg.name]
+    arm_ids = _resolve_arm_joint_ids(env, robot, robot_cfg)
+
+    dq = robot.data.joint_vel[:, arm_ids]                 # [N, 7]
+    dq_abs = robot.data.soft_joint_vel_limits[0, arm_ids]  # [7]   (use ±dq_abs)
+
+    low = dq < (-dq_abs).view(1, -1)
+    high = dq > (dq_abs).view(1, -1)
+    viol = low | high
+
+    if viol.any() and False:
+        names = [robot.data.joint_names[i] for i in arm_ids.tolist()]
+        env_ids = torch.nonzero(viol.any(dim=1), as_tuple=False).squeeze(1).tolist()
+        for e in env_ids:
+            which = torch.nonzero(viol[e], as_tuple=False).squeeze(1).tolist()
+            for j in which:
+                side = "MIN" if low[e, j] else "MAX"
+                print(f"Env {e}: {names[j]} VEL {side}  dq={dq[e, j].item():.4f}  "
+                      f"range=[{-dq_abs[j].item():.4f}, {dq_abs[j].item():.4f}]")
+    return viol.any(dim=1)
+
+
+def _effort_limits_from_actuators(robot: Articulation, env: ManagerBasedRLEnv, arm_ids: torch.Tensor) -> torch.Tensor:
+    """Build a [7]-vector of effort limits using joint-name groups (87 Nm for joints 1–4, 12 Nm for 5–7)."""
+    tau_abs = torch.zeros((arm_ids.shape[0],), device=env.device, dtype=torch.float32)
+    # Resolve which arm_ids belong to joints 1–4 vs 5–7 by name
+    names = [robot.data.joint_names[i] for i in arm_ids.tolist()]
+    for idx, n in enumerate(names):
+        # n like "panda_jointX"; parse X
+        try:
+            jnum = int(n.split("panda_joint")[1])
+        except Exception:
+            jnum = None
+        tau_abs[idx] = 87.0 if jnum is not None and 1 <= jnum <= 4 else 12.0
+    return tau_abs
+
+
+def franka_joint_torque_limits(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg) -> torch.Tensor:
+    """
+    Terminate per env if any Franka arm joint applied torque exceeds limits.
+    Note: with ImplicitActuatorCfg, 'applied_torque' may be an approximation.
+    """
+    robot: Articulation = env.scene[robot_cfg.name]
+    arm_ids = _resolve_arm_joint_ids(env, robot, robot_cfg)
+
+    # Try articulation data first
+    tau = getattr(robot.data, "applied_torque", None)
+    if tau is not None:
+        tau = tau[:, arm_ids]  # [N, 7]
+    else:
+        # Fallback to observation helper if needed
+        tau = joint_effort(env, robot_cfg)[:, arm_ids]
+
+    # Try effort limits from data; if missing/unset, build from actuator groups (87/12)
+    tau_abs = getattr(robot.data, "joint_effort_limits", None)
+    if tau_abs is not None:
+        tau_abs = tau_abs[0, arm_ids].abs()
+        if torch.any(tau_abs > 1e6):  # sentinel large values → treat as unset
+            tau_abs = _effort_limits_from_actuators(robot, env, arm_ids)
+    else:
+        tau_abs = _effort_limits_from_actuators(robot, env, arm_ids)
+
+    low = tau < (-tau_abs).view(1, -1)
+    high = tau > (tau_abs).view(1, -1)
+    viol = low | high
+
+    if viol.any() and False:
+        names = [robot.data.joint_names[i] for i in arm_ids.tolist()]
+        env_ids = torch.nonzero(viol.any(dim=1), as_tuple=False).squeeze(1).tolist()
+        for e in env_ids:
+            which = torch.nonzero(viol[e], as_tuple=False).squeeze(1).tolist()
+            for j in which:
+                side = "MIN" if low[e, j] else "MAX"
+                print(f"Env {e}: {names[j]} TAU {side}  τ={tau[e, j].item():.4f}  "
+                      f"range=[{-tau_abs[j].item():.4f}, {tau_abs[j].item():.4f}]")
+    return viol.any(dim=1)
 
 
 def franka_joint_limits(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg) -> torch.Tensor:
-    """Terminates the episode if the Franka robot's joint positions exceed their limits.
-
-    This function checks if any of the robot's joints have moved beyond the predefined
-    minimum and maximum limits. Exceeding these limits is considered a failure condition.
-    """
-    robot: Articulation = env.scene[robot_cfg.name]
-    joint_pos_full = robot.data.joint_pos       # shape: (num_envs, 9)
-    joint_pos = joint_pos_full[:, -7:]     # shape: (num_envs, 7)
-
-    min_limits = FRANKA_JOINT_LIMITS_MIN.to(env.device)
-    max_limits = FRANKA_JOINT_LIMITS_MAX.to(env.device)
-
-    # Check for violations in either direction
-    lower_limit_violation = torch.any(joint_pos < min_limits, dim=1)
-    upper_limit_violation = torch.any(joint_pos > max_limits, dim=1)
-
-    return torch.logical_or(lower_limit_violation, upper_limit_violation)
+    """Combined termination: position OR velocity OR torque limit violated."""
+    pos = franka_joint_pos_limits(env, robot_cfg)
+    vel = franka_joint_vel_limits(env, robot_cfg)
+    tau = franka_joint_torque_limits(env, robot_cfg)
+    return pos | vel | tau
 
 
 def franka_self_collision(
     env: ManagerBasedRLEnv,
-    robot_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,    # your ContactSensor cfg
+    threshold: float = 0.0         # any nonzero force → collision
 ) -> torch.Tensor:
     """
-    Terminate an episode as soon as any self‑collision force is registered.
-    Uses the ContactSensor’s net_forces_w buffer.
-
-    Returns:
-        torch.BoolTensor of shape (num_envs,), where True indicates a collision.
+    Per-env self-collision termination: returns True wherever
+    the contact sensor reports any force above `threshold`.
     """
-    # Retrieve the ContactSensor instance by its config name
-    sensor = env.scene.sensors["contact_sensor"]
-    # net_forces_w has shape (num_envs, num_bodies, 3)
-    net_forces = sensor.data.net_forces_w
-    # Compute per-body force magnitudes: (num_envs, num_bodies)
-    magnitudes = torch.norm(net_forces, dim=-1)
-    # A collision occurred in an environment if any body force > 0
-    collided = magnitudes > 0.0
-    # Return a per-env mask
-    return collided.any(dim=-1)
+    # undesired_contacts returns an (N,) tensor of counts per env
+    counts: torch.Tensor = undesired_contacts(env, threshold, sensor_cfg)
+
+    # boolean mask of which envs had ≥1 violation
+    collided: torch.Tensor = counts > 0
+
+    # optional per-env debug print
+    for e, c in enumerate(collided.tolist()):
+        if c:
+            print(f"Env {e}: self - collision detected({int(counts[e])} contacts above {threshold})")
+
+    # inside franka_self_collision before computing `collided`
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
+    net_forces = contact_sensor.data.net_forces_w_history    # shape [N_envs, hist, N_bodies, 3]
+    # take max over history window, then norm to get per-body force
+    max_forces = torch.max(
+        torch.norm(net_forces[..., :], dim=-1), dim=1
+    )[0]  # shape (N_envs, N_bodies)
+
+    for e in range(env.num_envs):
+        # find bodies with any non-zero force
+        body_idxs = (max_forces[e] > 0.0).nonzero(as_tuple=False).squeeze(-1).tolist()
+        if body_idxs:
+            mags = [max_forces[e, i].item() for i in body_idxs]
+            print(f"Env {e} spurious contacts on bodies {body_idxs} with mags {mags}")
+
+    return collided
 
 
 def goal_reached(

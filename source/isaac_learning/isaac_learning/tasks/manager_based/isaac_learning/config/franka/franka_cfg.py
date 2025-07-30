@@ -18,9 +18,30 @@ from isaaclab.sim import schemas
 from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
 
-# Define constants for joint limits
-FRANKA_JOINT_LIMITS_MIN = torch.tensor([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973])
-FRANKA_JOINT_LIMITS_MAX = torch.tensor([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973])
+
+# Position limits (radians)
+FRANKA_JOINT_POS_LIMITS_MIN: torch.Tensor = torch.tensor(
+    [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973],
+    dtype=torch.float32,
+)
+FRANKA_JOINT_POS_LIMITS_MAX: torch.Tensor = torch.tensor(
+    [2.8973, 1.7628, 2.8973, 0.0698, 2.8973, 3.7525, 2.8973],
+    dtype=torch.float32,
+)
+
+# Velocity limits (rad/s)
+FRANKA_JOINT_VEL_LIMITS_MAX: torch.Tensor = torch.tensor(
+    [2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100],
+    dtype=torch.float32,
+)
+FRANKA_JOINT_VEL_LIMITS_MIN: torch.Tensor = -FRANKA_JOINT_VEL_LIMITS_MAX
+
+# Torque limits (Nm)
+FRANKA_JOINT_TORQUE_LIMITS_MAX: torch.Tensor = torch.tensor(
+    [87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0],
+    dtype=torch.float32,
+)
+FRANKA_JOINT_TORQUE_LIMITS_MIN: torch.Tensor = -FRANKA_JOINT_TORQUE_LIMITS_MAX
 
 
 FRANKA_PANDA_CFG = ArticulationCfg(

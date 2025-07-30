@@ -57,7 +57,10 @@ class SceneCfg(InteractiveSceneCfg):
 
     # Contact sensor
     contact_sensor = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/.*", update_period=0.0, history_length=6, debug_vis=True
+        prim_path="{ENV_REGEX_NS}/Robot/panda_link[1-7]$",
+        update_period=0.0,
+        history_length=6,
+        debug_vis=True
     )
 
 

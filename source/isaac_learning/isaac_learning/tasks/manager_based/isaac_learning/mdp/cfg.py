@@ -99,12 +99,14 @@ class TerminationsCfg:
     franka_joint_limits = TerminationTermCfg(
         func=terminations.franka_joint_limits,
 
-        params={"robot_cfg": mdp.SceneEntityCfg("robot", joint_names=".*")}
+        params={
+            "robot_cfg": SceneEntityCfg(name="robot", joint_names=[r"panda_joint[1-7]"])
+        }
     )
     franka_self_collision = TerminationTermCfg(
         func=terminations.franka_self_collision,
 
-        params={"robot_cfg": mdp.SceneEntityCfg("contact_sensor")}
+        params={"sensor_cfg": mdp.SceneEntityCfg("contact_sensor"), "threshold": 0.0, }
     )
     goal_reached = TerminationTermCfg(
         func=terminations.goal_reached,
