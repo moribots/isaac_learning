@@ -37,17 +37,31 @@ class FrankaReachJointTorqueEnvCfg(ReachEnvCfg):
 
         # Action settings
         self.actions.arm_action = JointEffortActionCfg(
-            asset_name="robot", joint_names=["panda_joint[1-7]"], scale=100.0
+            asset_name="robot", joint_names=["panda_joint[1-7]"], scale={
+                "panda_joint[1-4]*": 87.0,
+                "panda_joint[5-7]*": 12.0,
+            },
         )
 
 
 @configclass
 class FrankaReachJointTorqueEnvCfg_PLAY(ReachEnvCfg):
+    _env_class = FrankaReachEnv
+
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
         # make a smaller scene for play
-        self.scene.num_envs = 3
+        self.scene.robot = FRANKA_PANDA_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.scene.num_envs = 1
         self.scene.env_spacing = 2.5
         # disable randomization for play
         self.observations.policy.enable_corruption = False
+
+        # Action settings
+        self.actions.arm_action = JointEffortActionCfg(
+            asset_name="robot", joint_names=["panda_joint[1-7]"], scale={
+                "panda_joint[1-4]*": 87.0,
+                "panda_joint[5-7]*": 12.0,
+            },
+        )

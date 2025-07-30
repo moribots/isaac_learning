@@ -11,54 +11,64 @@ from __future__ import annotations
 
 import torch
 
+
 from isaaclab.assets import Articulation
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.envs.mdp.rewards import undesired_contacts
+from isaaclab.envs.mdp.terminations import joint_pos_out_of_limit, joint_vel_out_of_limit, joint_effort_out_of_limit, illegal_contact
 
-from ..config.franka.franka_cfg import FRANKA_JOINT_LIMITS_MAX, FRANKA_JOINT_LIMITS_MIN
+from ..config.franka.franka_cfg import *
+
+PRINT = False
 
 
 def franka_joint_limits(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg) -> torch.Tensor:
-    """Terminates the episode if the Franka robot's joint positions exceed their limits.
-
-    This function checks if any of the robot's joints have moved beyond the predefined
-    minimum and maximum limits. Exceeding these limits is considered a failure condition.
-    """
-    robot: Articulation = env.scene[robot_cfg.name]
-    joint_pos_full = robot.data.joint_pos       # shape: (num_envs, 9)
-    joint_pos = joint_pos_full[:, -7:]     # shape: (num_envs, 7)
-
-    min_limits = FRANKA_JOINT_LIMITS_MIN.to(env.device)
-    max_limits = FRANKA_JOINT_LIMITS_MAX.to(env.device)
-
-    # Check for violations in either direction
-    lower_limit_violation = torch.any(joint_pos < min_limits, dim=1)
-    upper_limit_violation = torch.any(joint_pos > max_limits, dim=1)
-
-    return torch.logical_or(lower_limit_violation, upper_limit_violation)
+    """Combined termination: position OR velocity OR torque limit violated."""
+    pos = joint_pos_out_of_limit(env, robot_cfg)
+    vel = False  # joint_vel_out_of_limit(env, robot_cfg)
+    tau = joint_effort_out_of_limit(env, robot_cfg)
+    return pos | vel | tau
 
 
 def franka_self_collision(
     env: ManagerBasedRLEnv,
-    robot_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,    # your ContactSensor cfg
+    threshold: float = 0.0         # any nonzero force → collision
 ) -> torch.Tensor:
     """
-    Terminate an episode as soon as any self‑collision force is registered.
-    Uses the ContactSensor’s net_forces_w buffer.
-
-    Returns:
-        torch.BoolTensor of shape (num_envs,), where True indicates a collision.
+    Per-env self-collision termination: returns True wherever
+    the contact sensor reports any force above `threshold`.
     """
-    # Retrieve the ContactSensor instance by its config name
-    sensor = env.scene.sensors["contact_sensor"]
-    # net_forces_w has shape (num_envs, num_bodies, 3)
-    net_forces = sensor.data.net_forces_w
-    # Compute per-body force magnitudes: (num_envs, num_bodies)
-    magnitudes = torch.norm(net_forces, dim=-1)
-    # A collision occurred in an environment if any body force > 0
-    collided = magnitudes > 0.0
-    # Return a per-env mask
-    return collided.any(dim=-1)
+    # # undesired_contacts returns an (N,) tensor of counts per env
+    # counts: torch.Tensor = undesired_contacts(env, threshold, sensor_cfg)
+
+    # # boolean mask of which envs had ≥1 violation
+    # collided: torch.Tensor = counts > 0
+
+    # # optional per-env debug print
+    # for e, c in enumerate(collided.tolist()):
+    #     if c:
+    #         print(f"Env {e}: self - collision detected({int(counts[e])} contacts above {threshold})")
+
+    # # inside franka_self_collision before computing `collided`
+    # contact_sensor = env.scene.sensors[sensor_cfg.name]
+    # net_forces = contact_sensor.data.net_forces_w_history    # shape [N_envs, hist, N_bodies, 3]
+    # # take max over history window, then norm to get per-body force
+    # max_forces = torch.max(
+    #     torch.norm(net_forces[..., :], dim=-1), dim=1
+    # )[0]  # shape (N_envs, N_bodies)
+
+    # for e in range(env.num_envs):
+    #     # find bodies with any non-zero force
+    #     body_idxs = (max_forces[e] > 0.0).nonzero(as_tuple=False).squeeze(-1).tolist()
+    #     if body_idxs:
+    #         mags = [max_forces[e, i].item() for i in body_idxs]
+    #         print(f"Env {e} spurious contacts on bodies {body_idxs} with mags {mags}")
+
+    # return collided
+
+    return illegal_contact(env, threshold, sensor_cfg)
 
 
 def goal_reached(

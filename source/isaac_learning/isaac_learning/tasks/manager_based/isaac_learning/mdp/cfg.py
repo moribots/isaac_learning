@@ -9,6 +9,7 @@ from isaaclab.utils import configclass
 from isaaclab.envs.mdp.actions import JointEffortActionCfg
 from isaaclab.envs.mdp.commands import UniformPoseCommandCfg
 from isaaclab.envs.mdp import terminations as mdp_terminations
+from isaaclab.envs.mdp.events import reset_joints_by_scale
 from isaaclab.managers import (
     CurriculumTermCfg,
     TerminationTermCfg,
@@ -16,6 +17,7 @@ from isaaclab.managers import (
     ObservationTermCfg,
     RewardTermCfg,
     CommandTermCfg,
+    EventTermCfg,
     SceneEntityCfg
 )
 
@@ -62,16 +64,20 @@ class RewardsCfg:
         func=rewards.ee_stay_up_reward, weight=1.0, params={"weight": 1.0, "robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
     )
     joint_vel_penalty = RewardTermCfg(
-        func=rewards.joint_vel_penalty, weight=0.0, params={"weight": 0.0, "robot_cfg": mdp.SceneEntityCfg("robot")}
+        func=rewards.joint_vel_penalty, weight=-0.2, params={"weight": -0.2, "robot_cfg": mdp.SceneEntityCfg("robot")}
     )
     joint_acc_penalty = RewardTermCfg(
-        func=rewards.joint_acc_penalty, weight=0.0, params={"weight": 0.0, "robot_cfg": mdp.SceneEntityCfg("robot")}
+        func=rewards.joint_acc_penalty, weight=-0.01, params={"weight": -0.01, "robot_cfg": mdp.SceneEntityCfg("robot")}
     )
     ee_twist_penalty = RewardTermCfg(
-        func=rewards.ee_twist_penalty, weight=0.0, params={"weight": 0.0, "robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
+        func=rewards.ee_twist_penalty, weight=-0.01, params={"weight": -0.1, "robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
     )
     action_smoothness_penalty = RewardTermCfg(
-        func=rewards.action_smoothness_penalty, weight=0.0, params={"weight": 0.0}
+        func=rewards.action_smoothness_penalty, weight=-0.1, params={"weight": -0.1}
+    )
+    joint_limit: RewardTermCfg = RewardTermCfg(
+        func=rewards.joint_limit_margin_penalty,
+        weight=-0.5, params={"asset_cfg": SceneEntityCfg(name="robot", joint_names=[r"panda_joint[1-7]"]), "margin": 0.05}
     )
     # One‑time success bonus when goal reached
     success_reward = RewardTermCfg(
@@ -91,6 +97,19 @@ class RewardsCfg:
 # MDP Events (including Terminations)
 ##
 
+@configclass
+class EventCfg:
+    """Configuration for events."""
+
+    reset_robot_joints = EventTermCfg(
+        func=reset_joints_by_scale,
+        mode="reset",
+        params={
+            "position_range": (0.5, 1.5),
+            "velocity_range": (0.0, 0.0),
+        },
+    )
+
 
 @configclass
 class TerminationsCfg:
@@ -99,12 +118,14 @@ class TerminationsCfg:
     franka_joint_limits = TerminationTermCfg(
         func=terminations.franka_joint_limits,
 
-        params={"robot_cfg": mdp.SceneEntityCfg("robot", joint_names=".*")}
+        params={
+            "robot_cfg": SceneEntityCfg(name="robot", joint_names=[r"panda_joint[1-7]"])
+        }
     )
     franka_self_collision = TerminationTermCfg(
         func=terminations.franka_self_collision,
 
-        params={"robot_cfg": mdp.SceneEntityCfg("contact_sensor")}
+        params={"sensor_cfg": mdp.SceneEntityCfg("contact_sensor"), "threshold": 0.0, }
     )
     goal_reached = TerminationTermCfg(
         func=terminations.goal_reached,
@@ -163,4 +184,11 @@ class ObservationsCfg:
 class ActionsCfg:
     """Action specifications for the MDP."""
 
-    arm_action = JointEffortActionCfg(asset_name="robot", joint_names=["panda_joint[1-7]"], scale=100.0)
+    arm_action = JointEffortActionCfg(
+        asset_name="robot",
+        joint_names=["panda_joint[1-7]"],
+        scale={
+            "panda_joint[1-4]*": 87.0,
+            "panda_joint[5-7]*": 12.0,
+        },
+    )

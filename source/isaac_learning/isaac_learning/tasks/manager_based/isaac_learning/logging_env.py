@@ -40,6 +40,14 @@ class FrankaReachEnv(ManagerBasedRLEnv):
                                       orientation=quat_from_euler_xyz(*sr),
                                       env_index=i)
 
+            robot = self.scene["robot"]
+            q0 = robot.data.default_joint_pos.clone()
+            dq0 = torch.zeros_like(q0)
+            robot.write_root_pose_to_sim(robot.data.default_root_state_w[:, :3], robot.data.default_root_state_w[:, 3:7])
+            robot.write_root_velocity_to_sim(torch.zeros_like(robot.data.root_lin_vel_w), torch.zeros_like(robot.data.root_ang_vel_w))
+            robot.write_joint_state_to_sim(q0, dq0)
+            robot.reset()  # clear internal caches after writes
+
     def _get_extras(self):
         extras = super()._get_extras()
         # log individual reward terms

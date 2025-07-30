@@ -23,6 +23,7 @@ from .mdp.cfg import (
     ObservationsCfg,
     RewardsCfg,
     TerminationsCfg,
+    EventCfg,
 )
 
 import numpy as np
@@ -57,7 +58,10 @@ class SceneCfg(InteractiveSceneCfg):
 
     # Contact sensor
     contact_sensor = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/.*", update_period=0.0, history_length=6, debug_vis=True
+        prim_path="{ENV_REGEX_NS}/Robot/panda_link[1-7]$",
+        update_period=0.0,
+        history_length=6,
+        debug_vis=True
     )
 
 
@@ -87,6 +91,9 @@ class ReachEnvCfg(ManagerBasedRLEnvCfg):
 
     # Curriculum settings
     curriculum: CurriculumCfg = CurriculumCfg()
+
+    # Adds one-frame PD hold on reset
+    events: EventCfg = EventCfg()
 
     # Uniform sampling ranges for goal and shelf poses
     goal_pose_range = {

@@ -11,6 +11,7 @@ import argparse
 
 from isaaclab.app import AppLauncher
 
+
 # local imports
 import cli_args  # isort: skip
 
@@ -57,6 +58,8 @@ from isaaclab.utils.dict import print_dict
 from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
+from isaaclab.envs.mdp.observations import joint_pos
+from isaaclab.managers import SceneEntityCfg
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
@@ -146,19 +149,25 @@ def main():
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
-            actions = policy(obs)
+            # Replace agent actions with zeros of the same dimension as policy output
+            actions = torch.zeros_like(policy(obs))
             # env stepping
-            obs, _, _, _ = env.step(actions)
+            obs, _, done, extras = env.step(actions)
+        timestep += 1
         if args_cli.video:
-            timestep += 1
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
 
-        # time delay for real-time evaluation
-        sleep_time = dt - (time.time() - start_time)
-        if args_cli.real_time and sleep_time > 0:
-            time.sleep(sleep_time)
+        # === DEBUG: print termination flags ===
+        jl_flags = extras.get("Episode_Termination/franka_joint_limits")    # typically an array of 0/1
+        if done.any():
+            print(f"[Eval] Step {timestep:3d} → extras: {extras}")
+
+    # time delay for real-time evaluation
+    sleep_time = dt - (time.time() - start_time)
+    if args_cli.real_time and sleep_time > 0:
+        time.sleep(sleep_time)
 
     # close the simulator
     env.close()
