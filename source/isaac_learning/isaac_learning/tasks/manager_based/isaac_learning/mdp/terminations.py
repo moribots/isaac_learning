@@ -35,6 +35,19 @@ def franka_joint_limits(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg) -> to
     lower_limit_violation = torch.any(joint_pos < min_limits, dim=1)
     upper_limit_violation = torch.any(joint_pos > max_limits, dim=1)
 
+    if upper_limit_violation.any() or lower_limit_violation.any():
+        violated_joints_min = (joint_pos < min_limits).nonzero(as_tuple=True)
+        violated_joints_max = (joint_pos > max_limits).nonzero(as_tuple=True)
+
+        for i in range(violated_joints_min[0].shape[0]):
+            env_idx = violated_joints_min[0][i]
+            joint_idx = violated_joints_min[1][i]
+            print(f"  Env {env_idx}: Joint {joint_idx} violated MIN limit. Pos: {joint_pos[env_idx, joint_idx]:.4f}, Min: {min_limits[joint_idx]:.4f}")
+        for i in range(violated_joints_max[0].shape[0]):
+            env_idx = violated_joints_max[0][i]
+            joint_idx = violated_joints_max[1][i]
+            print(f"  Env {env_idx}: Joint {joint_idx} violated MAX limit. Pos: {joint_pos[env_idx, joint_idx]:.4f}, Max: {max_limits[joint_idx]:.4f}")
+
     return torch.logical_or(lower_limit_violation, upper_limit_violation)
 
 
