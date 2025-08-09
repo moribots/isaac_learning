@@ -83,6 +83,19 @@ def ee_stay_up_reward(
     return weight * ee_pos_z
 
 
+def joint_limit_margin_penalty(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, margin: float = 0.05):
+    robot = env.scene[asset_cfg.name]
+    q = robot.data.joint_pos  # [num_envs, dof]
+    q_low = robot.data.joint_pos_limits[..., 0]
+    q_high = robot.data.joint_pos_limits[..., 1]
+    # distance to limits (negative when inside by > margin)
+    d_low = (q - q_low) - margin
+    d_high = (q_high - q) - margin
+    # penalty only when margin violated
+    pen = torch.clamp_min(-d_low, 0.0) + torch.clamp_min(-d_high, 0.0)
+    return -pen.sum(dim=-1)
+
+
 def joint_acc_penalty(env: ManagerBasedRLEnv, weight: float, robot_cfg: SceneEntityCfg) -> torch.Tensor:
     """Penalizes high joint accelerations.
 
