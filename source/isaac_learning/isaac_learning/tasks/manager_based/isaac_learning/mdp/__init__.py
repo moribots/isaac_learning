@@ -32,3 +32,4 @@ from .cfg import *
 from .observations import *
 from .rewards import *
 from .terminations import *
+from .events import *

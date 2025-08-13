@@ -22,7 +22,7 @@ from isaaclab.managers import (
 )
 
 # Import the local project modules
-from . import observations, rewards, terminations
+from . import observations, rewards, terminations, events
 
 ##
 # MDP Commands
@@ -101,6 +101,16 @@ class RewardsCfg:
 class EventCfg:
     """Configuration for events."""
 
+    # Replace your prior reset sequence (and remove freeze/quiesce events).
+    zero_vel_reset = EventTermCfg(
+        func=events.authoritative_zero_vel_reset,
+        mode="reset",
+        min_step_count_between_reset=0,
+        params={
+            "robot_cfg": SceneEntityCfg(name="robot", joint_names=[r"panda_joint[1-7]"]),
+        },
+    )
+
     reset_robot_joints = EventTermCfg(
         func=reset_joints_by_scale,
         mode="reset",
@@ -109,6 +119,20 @@ class EventCfg:
             "velocity_range": (0.0, 0.0),
         },
     )
+
+    # place_goal_and_shelf = EventTermCfg(
+    #     func=events.place_goal_and_shelf_on_reset,
+    #     mode="reset",
+    #     min_step_count_between_reset=0,
+    #     params={
+    #         # Omit params to use env.goal_path/env.shelf_path and env.*_ranges,
+    #         # or pass explicit overrides like:
+    #         # "goal_path": "/World/envs/env_.*/Goal",
+    #         # "shelf_path": "/World/envs/env_.*/Shelf",
+    #         # "goal_ranges": {...},
+    #         # "shelf_ranges": {...},
+    #     },
+    # )
 
 
 @configclass

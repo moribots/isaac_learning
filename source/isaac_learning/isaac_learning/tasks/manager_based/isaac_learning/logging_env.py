@@ -40,13 +40,20 @@ class FrankaReachEnv(ManagerBasedRLEnv):
                                       orientation=quat_from_euler_xyz(*sr),
                                       env_index=i)
 
-            robot = self.scene["robot"]
-            q0 = robot.data.default_joint_pos.clone()
-            dq0 = torch.zeros_like(q0)
-            robot.write_root_pose_to_sim(robot.data.default_root_state_w[:, :3], robot.data.default_root_state_w[:, 3:7])
-            robot.write_root_velocity_to_sim(torch.zeros_like(robot.data.root_lin_vel_w), torch.zeros_like(robot.data.root_ang_vel_w))
-            robot.write_joint_state_to_sim(q0, dq0)
-            robot.reset()  # clear internal caches after writes
+            robot = env.scene["robot"]
+            # 1) root pose (offset by env origins if you use them)
+            root_state = robot.data.default_root_state.clone()
+            root_state[:, :3] += env.scene.env_origins   # if you use InteractiveScene origins
+            robot.write_root_pose_to_sim(root_state[:, :7], env_ids=env_ids)
+            # 2) zero root velocity
+            robot.write_root_velocity_to_sim(torch.zeros_like(root_state[:, 7:]), env_ids=env_ids)
+            # 3) joint state with zero dq
+            q = robot.data.default_joint_pos.clone()
+            dq = torch.zeros_like(robot.data.default_joint_vel)
+            robot.write_joint_state_to_sim(q, dq, env_ids=env_ids)
+            # 4) finalize reset (clears internal buffers)
+            robot.reset(env_ids=env_ids)
+            print("RESET")
 
     def _get_extras(self):
         extras = super()._get_extras()

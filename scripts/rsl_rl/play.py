@@ -162,7 +162,8 @@ def main():
         # === DEBUG: print termination flags ===
         jl_flags = extras.get("Episode_Termination/franka_joint_limits")    # typically an array of 0/1
         if done.any():
-            print(f"[Eval] Step {timestep:3d} → extras: {extras}")
+            # print(f"[Eval] Step {timestep:3d} → extras: {extras}")
+            print("RESET")
 
     # time delay for real-time evaluation
     sleep_time = dt - (time.time() - start_time)

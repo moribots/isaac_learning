@@ -47,9 +47,6 @@ class SceneCfg(InteractiveSceneCfg):
     # robot
     robot: ArticulationCfg = FRANKA_PANDA_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
-    # Goal marker settings
-    # ee_goal: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
-
     # lights
     light = AssetBaseCfg(
         prim_path="/World/light",
