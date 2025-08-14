@@ -55,7 +55,7 @@ class RewardsCfg:
     """Reward terms for the MDP."""
 
     ee_pos_tracking_reward = RewardTermCfg(
-        func=rewards.ee_pos_tracking_reward, weight=1.0, params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
+        func=rewards.ee_pos_tracking_reward, weight=20.0, params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
     )
     ee_quat_tracking_reward = RewardTermCfg(
         func=rewards.ee_quat_tracking_reward, weight=0.5, params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
@@ -64,20 +64,20 @@ class RewardsCfg:
         func=rewards.ee_stay_up_reward, weight=1.0, params={"weight": 1.0, "robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
     )
     joint_vel_penalty = RewardTermCfg(
-        func=rewards.joint_vel_penalty, weight=-0.2, params={"weight": -0.2, "robot_cfg": mdp.SceneEntityCfg("robot")}
+        func=rewards.joint_vel_penalty, weight=0.5, params={"weight": 0.5, "robot_cfg": mdp.SceneEntityCfg("robot")}
     )
     joint_acc_penalty = RewardTermCfg(
-        func=rewards.joint_acc_penalty, weight=-0.01, params={"weight": -0.01, "robot_cfg": mdp.SceneEntityCfg("robot")}
+        func=rewards.joint_acc_penalty, weight=0.5, params={"weight": 0.5, "robot_cfg": mdp.SceneEntityCfg("robot")}
     )
     ee_twist_penalty = RewardTermCfg(
-        func=rewards.ee_twist_penalty, weight=-0.01, params={"weight": -0.1, "robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
+        func=rewards.ee_twist_penalty, weight=0.5, params={"weight": 0.5, "robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
     )
     action_smoothness_penalty = RewardTermCfg(
-        func=rewards.action_smoothness_penalty, weight=-0.1, params={"weight": -0.1}
+        func=rewards.action_smoothness_penalty, weight=0.1, params={"weight": 0.1}
     )
-    joint_limit: RewardTermCfg = RewardTermCfg(
-        func=rewards.joint_limit_margin_penalty,
-        weight=-0.5, params={"asset_cfg": SceneEntityCfg(name="robot", joint_names=[r"panda_joint[1-7]"]), "margin": 0.05}
+    joint_torque_penalty: RewardTermCfg = RewardTermCfg(
+        func=rewards.joint_torque_limit_penalty,
+        weight=5.0, params={"asset_cfg": SceneEntityCfg(name="robot", joint_names=[r"panda_joint[1-7]"]), "margin": 0.05}
     )
     # One‑time success bonus when goal reached
     success_reward = RewardTermCfg(

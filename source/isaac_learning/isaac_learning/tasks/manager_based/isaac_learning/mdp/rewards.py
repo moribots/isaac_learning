@@ -15,6 +15,7 @@ from isaaclab.assets import Articulation
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import quat_inv, quat_mul
+from ..config.franka.franka_cfg import FRANKA_JOINT_TORQUE_LIMITS_MIN, FRANKA_JOINT_TORQUE_LIMITS_MAX
 
 
 def ee_pos_tracking_reward(
@@ -24,7 +25,7 @@ def ee_pos_tracking_reward(
 ) -> torch.Tensor:
     """
     Continuous position‐tracking reward:
-      reward = -weight * ||ee_pos - goal_pos||_2
+      reward = weight * ||ee_pos - goal_pos||_2
     where goal_pos is fetched from the command manager under "goal_pose".
     """
     # 1. Lookup the robot articulation by its config name ("robot")
@@ -40,7 +41,7 @@ def ee_pos_tracking_reward(
 
     # 4. Compute Euclidean error and scale
     error = torch.norm(ee_pos - goal_pos, dim=1)  # (N,)
-    reward = -weight * error                       # (N,)
+    reward = weight * error                       # (N,)
 
     return reward
 
@@ -83,16 +84,47 @@ def ee_stay_up_reward(
     return weight * ee_pos_z
 
 
-def joint_limit_margin_penalty(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, margin: float = 0.05):
-    robot = env.scene[asset_cfg.name]
-    q = robot.data.joint_pos  # [num_envs, dof]
-    q_low = robot.data.joint_pos_limits[..., 0]
-    q_high = robot.data.joint_pos_limits[..., 1]
-    # distance to limits (negative when inside by > margin)
-    d_low = (q - q_low) - margin
-    d_high = (q_high - q) - margin
-    # penalty only when margin violated
-    pen = torch.clamp_min(-d_low, 0.0) + torch.clamp_min(-d_high, 0.0)
+def joint_torque_limit_penalty(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    margin: float = 0.05,
+    power: float = 2.0,
+) -> torch.Tensor:
+    """
+    Penalize joints as measured torque approaches the Franka limits.
+
+    Args:
+        env: Manager-based RL env.
+        asset_cfg: Scene entity for the robot (uses asset_cfg.joint_ids).
+        margin: Fractional margin. Penalty starts when |tau|/limit > 1 - margin.
+        power: Exponent of the near-limit hinge (2.0 quadratic).
+
+    Returns:
+        Tensor [num_envs] of negative penalties.
+    """
+    # Live handles
+    asset: Articulation = env.scene[asset_cfg.name]
+    device = env.device
+
+    # Select measured torques for controlled joints
+    # applied_torque: what was actually applied by sim this step
+    # computed_torque: controller-computed before clamping
+    tau_appl = asset.data.applied_torque[:, asset_cfg.joint_ids]
+    tau_comp = asset.data.computed_torque[:, asset_cfg.joint_ids]
+    # Conservative: use the larger magnitude per joint
+    tau = torch.where(tau_appl.abs() >= tau_comp.abs(), tau_appl, tau_comp)
+
+    # Broadcast Franka limits to device and select joints
+    lim_hi = FRANKA_JOINT_TORQUE_LIMITS_MAX.to(device)[asset_cfg.joint_ids]  # [dof_sel]
+    lim_lo = FRANKA_JOINT_TORQUE_LIMITS_MIN.to(device)[asset_cfg.joint_ids]
+    lim_sym = torch.max(lim_hi.abs(), lim_lo.abs())  # [dof_sel], symmetric magnitude
+
+    # Utilization and hinge near the limit
+    util = tau.abs() / (lim_sym + 1e-6)               # [N, dof_sel]
+    thresh = 1.0 - float(margin)
+    over = torch.clamp(util - thresh, min=0.0)
+    pen = over.pow(power)                              # stronger near the limit
+
     return -pen.sum(dim=-1)
 
 
@@ -103,7 +135,7 @@ def joint_acc_penalty(env: ManagerBasedRLEnv, weight: float, robot_cfg: SceneEnt
     proportional to the squared joint accelerations.
     """
     robot: Articulation = env.scene[robot_cfg.name]
-    return weight * torch.sum(torch.square(robot.data.joint_acc), dim=1)
+    return -weight * torch.sum(torch.square(robot.data.joint_acc), dim=1)
 
 
 def joint_vel_penalty(env: ManagerBasedRLEnv, weight: float, robot_cfg: SceneEntityCfg) -> torch.Tensor:
@@ -114,7 +146,7 @@ def joint_vel_penalty(env: ManagerBasedRLEnv, weight: float, robot_cfg: SceneEnt
     more controlled motions.
     """
     robot: Articulation = env.scene[robot_cfg.name]
-    return weight * torch.sum(torch.square(robot.data.joint_vel), dim=1)
+    return -weight * torch.sum(torch.square(robot.data.joint_vel), dim=1)
 
 
 def ee_twist_penalty(env: ManagerBasedRLEnv, weight: float, robot_cfg: SceneEntityCfg) -> torch.Tensor:
@@ -126,7 +158,7 @@ def ee_twist_penalty(env: ManagerBasedRLEnv, weight: float, robot_cfg: SceneEnti
     robot: Articulation = env.scene[robot_cfg.name]
     ee_body_idx = robot_cfg.body_ids[0]
     ee_twist = robot.data.body_vel_w[:, ee_body_idx]
-    return weight * torch.sum(torch.square(ee_twist), dim=1)
+    return -weight * torch.sum(torch.square(ee_twist), dim=1)
 
 
 def action_smoothness_penalty(env: ManagerBasedRLEnv, weight: float) -> torch.Tensor:
@@ -137,7 +169,7 @@ def action_smoothness_penalty(env: ManagerBasedRLEnv, weight: float) -> torch.Te
     """
     actions = env.action_manager.action
     last_actions = env.action_manager.prev_action
-    return weight * torch.sum(torch.square(actions - last_actions), dim=1)
+    return -weight * torch.sum(torch.square(actions - last_actions), dim=1)
 
 
 def success_bonus(env: ManagerBasedRLEnv, threshold: float) -> torch.Tensor:

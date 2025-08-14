@@ -150,7 +150,8 @@ def main():
         with torch.inference_mode():
             # agent stepping
             # Replace agent actions with zeros of the same dimension as policy output
-            actions = torch.zeros_like(policy(obs))
+            # actions = torch.zeros_like(policy(obs))
+            actions = policy(obs)
             # env stepping
             obs, _, done, extras = env.step(actions)
         timestep += 1
