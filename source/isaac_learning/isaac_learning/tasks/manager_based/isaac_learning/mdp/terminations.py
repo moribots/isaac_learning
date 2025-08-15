@@ -15,7 +15,6 @@ import torch
 from isaaclab.assets import Articulation
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.envs.mdp.rewards import undesired_contacts
 from isaaclab.envs.mdp.terminations import joint_pos_out_of_limit, joint_vel_out_of_limit, joint_effort_out_of_limit, illegal_contact
 
 from ..config.franka.franka_cfg import *
@@ -40,33 +39,6 @@ def franka_self_collision(
     Per-env self-collision termination: returns True wherever
     the contact sensor reports any force above `threshold`.
     """
-    # # undesired_contacts returns an (N,) tensor of counts per env
-    # counts: torch.Tensor = undesired_contacts(env, threshold, sensor_cfg)
-
-    # # boolean mask of which envs had ≥1 violation
-    # collided: torch.Tensor = counts > 0
-
-    # # optional per-env debug print
-    # for e, c in enumerate(collided.tolist()):
-    #     if c:
-    #         print(f"Env {e}: self - collision detected({int(counts[e])} contacts above {threshold})")
-
-    # # inside franka_self_collision before computing `collided`
-    # contact_sensor = env.scene.sensors[sensor_cfg.name]
-    # net_forces = contact_sensor.data.net_forces_w_history    # shape [N_envs, hist, N_bodies, 3]
-    # # take max over history window, then norm to get per-body force
-    # max_forces = torch.max(
-    #     torch.norm(net_forces[..., :], dim=-1), dim=1
-    # )[0]  # shape (N_envs, N_bodies)
-
-    # for e in range(env.num_envs):
-    #     # find bodies with any non-zero force
-    #     body_idxs = (max_forces[e] > 0.0).nonzero(as_tuple=False).squeeze(-1).tolist()
-    #     if body_idxs:
-    #         mags = [max_forces[e, i].item() for i in body_idxs]
-    #         print(f"Env {e} spurious contacts on bodies {body_idxs} with mags {mags}")
-
-    # return collided
 
     return illegal_contact(env, threshold, sensor_cfg)
 

@@ -33,3 +33,4 @@ from .observations import *
 from .rewards import *
 from .terminations import *
 from .events import *
+from .curricula import *

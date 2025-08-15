@@ -14,6 +14,8 @@ import torch
 from isaaclab.assets import Articulation
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.envs.mdp.terminations import illegal_contact
+
 from isaaclab.utils.math import quat_inv, quat_mul
 from ..config.franka.franka_cfg import FRANKA_JOINT_TORQUE_LIMITS_MIN, FRANKA_JOINT_TORQUE_LIMITS_MAX
 
@@ -195,17 +197,10 @@ def success_bonus(env: ManagerBasedRLEnv, threshold: float) -> torch.Tensor:
     return (dist < threshold).float()             # 1.0 where dist < threshold
 
 
-def collision_penalty(env: ManagerBasedRLEnv) -> torch.Tensor:
+def collision_penalty(env: ManagerBasedRLEnv, weight: float, sensor_cfg: SceneEntityCfg,
+                      threshold: float = 0.0) -> torch.Tensor:
     """-1.0 if any contact detected, else 0.0."""
 
-    # Retrieve the ContactSensor instance by its config name
-    sensor = env.scene.sensors["contact_sensor"]
-    # net_forces_w has shape (num_envs, num_bodies, 3)
-    net_forces = sensor.data.net_forces_w
-    # Compute per-body force magnitudes: (num_envs, num_bodies)
-    magnitudes = torch.norm(net_forces, dim=-1)
-    # A collision occurred in an environment if any body force > 0
-    collided = magnitudes > 0.0
-    contacts = collided.any(dim=-1).float()
-    # Return a per-env mask
-    return -1.0 * contacts.to(env.device).float()
+    if illegal_contact(env, threshold, sensor_cfg).any():
+        return -weight
+    return 0.0
