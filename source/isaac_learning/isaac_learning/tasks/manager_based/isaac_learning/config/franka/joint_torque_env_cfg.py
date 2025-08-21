@@ -4,26 +4,23 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
-Configuration for the Franka reach environment with joint position control.
+Configuration for the Franka reach environment with joint torque (effort) control.
 
 This configuration inherits from the base ReachEnvCfg and specifies the Franka robot
-as the robot asset and sets the action manager to use joint position control.
+as the robot asset and sets the action manager to use joint torque (effort) control.
 """
 
 from isaaclab.envs.mdp.actions import JointEffortActionCfg
 from isaaclab.utils import configclass
 
 from ...reach_env_cfg import ReachEnvCfg
-from ...logging_env import FrankaReachEnv  # for more detailed W&B logging
 from .franka_cfg import FRANKA_PANDA_CFG
 import math
 
 
 @configclass
 class FrankaReachJointTorqueEnvCfg(ReachEnvCfg):
-    """Configuration for the Franka reach environment with joint position control."""
-
-    _env_class = FrankaReachEnv
+    """Configuration for the Franka reach environment with joint torque (effort) control."""
 
     def __post_init__(self):
         """Post-initialization checks."""
@@ -46,7 +43,6 @@ class FrankaReachJointTorqueEnvCfg(ReachEnvCfg):
 
 @configclass
 class FrankaReachJointTorqueEnvCfg_PLAY(ReachEnvCfg):
-    _env_class = FrankaReachEnv
 
     def __post_init__(self):
         # post init of parent

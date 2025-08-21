@@ -150,8 +150,8 @@ def main():
         with torch.inference_mode():
             # agent stepping
             # Replace agent actions with zeros of the same dimension as policy output
-            # actions = torch.zeros_like(policy(obs))
-            actions = policy(obs)
+            actions = torch.zeros_like(policy(obs))
+            # actions = policy(obs)
             # env stepping
             obs, _, done, extras = env.step(actions)
         timestep += 1
@@ -163,7 +163,7 @@ def main():
         # === DEBUG: print termination flags ===
         jl_flags = extras.get("Episode_Termination/franka_joint_limits")    # typically an array of 0/1
         if done.any():
-            # print(f"[Eval] Step {timestep:3d} → extras: {extras}")
+            print(f"[Eval] Step {timestep:3d} → extras: {extras}")
             print("RESET")
 
     # time delay for real-time evaluation
