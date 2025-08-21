@@ -15,6 +15,7 @@ from isaaclab.assets import Articulation
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.envs.mdp.terminations import illegal_contact
+from isaaclab.envs.mdp.terminations import joint_vel_out_of_limit
 
 from isaaclab.utils.math import quat_inv, quat_mul
 from ..config.franka.franka_cfg import FRANKA_JOINT_TORQUE_LIMITS_MIN, FRANKA_JOINT_TORQUE_LIMITS_MAX
@@ -140,15 +141,14 @@ def joint_acc_penalty(env: ManagerBasedRLEnv, weight: float, robot_cfg: SceneEnt
     return -weight * torch.sum(torch.square(robot.data.joint_acc), dim=1)
 
 
-def joint_vel_penalty(env: ManagerBasedRLEnv, weight: float, robot_cfg: SceneEntityCfg) -> torch.Tensor:
-    """
-    Penalizes large joint velocities.
-
-    This function discourages high-speed joint movements to promote smoother,
-    more controlled motions.
-    """
-    robot: Articulation = env.scene[robot_cfg.name]
-    return -weight * torch.sum(torch.square(robot.data.joint_vel), dim=1)
+def joint_vel_penalty(
+    env: ManagerBasedRLEnv,
+    weight: float,
+    robot_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Per-env penalty: −weight where any joint velocity exceeds limit, else 0. Shape [N]."""
+    mask = joint_vel_out_of_limit(env, robot_cfg)  # [N] bool on device
+    return (-float(weight)) * mask.to(dtype=torch.float32)
 
 
 def ee_twist_penalty(env: ManagerBasedRLEnv, weight: float, robot_cfg: SceneEntityCfg) -> torch.Tensor:
@@ -197,10 +197,12 @@ def success_bonus(env: ManagerBasedRLEnv, threshold: float) -> torch.Tensor:
     return (dist < threshold).float()             # 1.0 where dist < threshold
 
 
-def collision_penalty(env: ManagerBasedRLEnv, weight: float, sensor_cfg: SceneEntityCfg,
-                      threshold: float = 0.0) -> torch.Tensor:
-    """-1.0 if any contact detected, else 0.0."""
-
-    if illegal_contact(env, threshold, sensor_cfg).any():
-        return -weight
-    return 0.0
+def collision_penalty(
+    env: ManagerBasedRLEnv,
+    weight: float,
+    sensor_cfg: SceneEntityCfg,
+    threshold: float = 0.0,
+) -> torch.Tensor:
+    """Per-env penalty: −weight where any illegal contact is present, else 0. Shape [N]."""
+    mask = illegal_contact(env, threshold, sensor_cfg)  # [N] bool on device
+    return (-float(weight)) * mask.to(dtype=torch.float32)
