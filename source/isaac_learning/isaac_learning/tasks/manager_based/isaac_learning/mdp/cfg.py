@@ -105,61 +105,68 @@ class CommandsCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
+    # Task shaping
     ee_pos_tracking_reward = RewardTermCfg(
-        func=rewards.ee_pos_tracking_reward, weight=2.5, params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
+        func=rewards.ee_pos_tracking_reward,
+        weight=2.5,
+        params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])},
     )
+    # Keep orientation reward in Isaac
     ee_quat_tracking_reward = RewardTermCfg(
-        func=rewards.ee_quat_tracking_reward, weight=0.5, params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
+        func=rewards.ee_quat_tracking_reward,
+        weight=1.0,
+        params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])},
     )
     ee_stay_up_reward = RewardTermCfg(
-        func=rewards.ee_stay_up_reward, weight=1.0, params={"weight": 1.0, "robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
+        func=rewards.ee_stay_up_reward,
+        weight=1.0,
+        params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])},
     )
+
+    # Penalties
+    # 1) Genesis-style magnitude penalty with proximity scaling
     joint_vel_penalty = RewardTermCfg(
-        func=rewards.joint_vel_penalty, weight=0.5, params={"weight": 0.5, "robot_cfg": mdp.SceneEntityCfg("robot")}
+        func=rewards.joint_vel_penalty,
+        weight=0.5,
+        params={
+            "robot_cfg": mdp.SceneEntityCfg("robot"),
+            "dist_threshold": 0.2,
+            "max_scale": 4.0,
+        },
     )
+    # 2) Additional penalty only for over-limit velocity
+    joint_vel_limit_exceed_penalty = RewardTermCfg(
+        func=rewards.joint_vel_limit_exceed_penalty,
+        weight=0.01,  # small to avoid changing Genesis balance
+        params={"robot_cfg": mdp.SceneEntityCfg("robot")},
+    )
+
     joint_acc_penalty = RewardTermCfg(
-        func=rewards.joint_acc_penalty, weight=1.0e-6, params={"weight": 1.0e-6, "robot_cfg": mdp.SceneEntityCfg("robot")}
+        func=rewards.joint_acc_penalty,
+        weight=1.0e-6,
+        params={"robot_cfg": mdp.SceneEntityCfg("robot")},
     )
     ee_twist_penalty = RewardTermCfg(
-        func=rewards.ee_twist_penalty, weight=0.5, params={"weight": 0.5, "robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])}
+        func=rewards.ee_twist_penalty,
+        weight=0.5,
+        params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])},
     )
     action_smoothness_penalty = RewardTermCfg(
-        func=rewards.action_smoothness_penalty, weight=0.1, params={"weight": 0.1}
+        func=rewards.action_smoothness_penalty,
+        weight=1.0e-3,
     )
-    joint_torque_penalty: RewardTermCfg = RewardTermCfg(
-        func=rewards.joint_torque_limit_penalty,
-        weight=1.0e-2, params={"asset_cfg": SceneEntityCfg(name="robot", joint_names=[r"panda_joint[1-7]"]), "margin": 0.05}
-    )
-    # One‑time success bonus when goal reached
+
+    # Success and collisions
     success_reward = RewardTermCfg(
         func=rewards.success_bonus,
         weight=200.0,
-        params={"threshold": 0.05}
+        params={"threshold": 0.05},
     )
-    # Penalty on any collision event
     collision_penalty = RewardTermCfg(
         func=rewards.collision_penalty,
-        weight=100.0,
-        params={"sensor_cfg": mdp.SceneEntityCfg("contact_sensor"), "threshold": 0.1, "weight": 100.0}
+        weight=20.0,  # match Genesis collision penalty scale
+        params={"sensor_cfg": mdp.SceneEntityCfg("contact_sensor"), "threshold": 0.1, "weight": 20.0},
     )
-
-    # self.k_dist_reward = 2.5
-    # self.k_joint_limit_penalty = 5.0
-    # self.k_collision_penalty = 20.0
-    # self.action_penalty_curriculum = CurriculumConfig(
-    #     start_value=1.0e-4, end_value=1.0e-3, start_metric_val=0.0, end_metric_val=0.2)
-    # self.accel_penalty_curriculum = CurriculumConfig(
-    #     start_value=0.0, end_value=1.0e-6, start_metric_val=0.4, end_metric_val=0.6)
-    # self.jerk_penalty_curriculum = CurriculumConfig(
-    #     start_value=0.0, end_value=1.0e-12, start_metric_val=0.7, end_metric_val=0.8)
-    # self.joint_velocity_penalty_curriculum = CurriculumConfig(
-    #     start_value=0.0, end_value=0.5, start_metric_val=0.85, end_metric_val=0.95)
-    # self.ee_velocity_penalty_curriculum = CurriculumConfig(
-    #     start_value=0.0, end_value=0.5, start_metric_val=0.85, end_metric_val=0.95)
-    # self.upright_bonus_curriculum = CurriculumConfig(
-    #     start_value=1.0, end_value=0.0, start_metric_val=0.0, end_metric_val=0.4)
-    # self.threshold_curriculum = CurriculumConfig(
-    #     start_value=0.05, end_value=0.005, start_metric_val=0.5, end_metric_val=0.84)
 
 
 ##
