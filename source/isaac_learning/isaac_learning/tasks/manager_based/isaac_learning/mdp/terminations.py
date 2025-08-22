@@ -26,7 +26,7 @@ def franka_joint_limits(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg) -> to
     """Combined termination: position OR velocity OR torque limit violated."""
     pos = joint_pos_out_of_limit(env, robot_cfg)
     vel = torch.zeros_like(pos, dtype=torch.bool)  # joint_vel_out_of_limit(env, robot_cfg)
-    tau = joint_effort_out_of_limit(env, robot_cfg)
+    tau = torch.zeros_like(pos, dtype=torch.bool)  # joint_effort_out_of_limit(env, robot_cfg)
     if (pos.any() or vel.any() or tau.any()):
         print(f"[franka_joint_limits] pos: {pos}, vel: {vel}, tau: {tau}") if PRINT else None
     return pos | vel | tau
