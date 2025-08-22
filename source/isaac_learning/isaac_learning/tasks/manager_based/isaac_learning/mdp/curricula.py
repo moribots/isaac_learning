@@ -14,8 +14,9 @@ Use with:
     )
 
 Notes:
-- No external scheduler. The modify_fn returns mdp.modify_term_cfg.NO_CHANGE to skip writes.  # see docs
-- Success rate uses exported episode counters from RecorderManager.
+- We return mdp.modify_term_cfg.NO_CHANGE when no write is desired.
+- Success rate is taken from RecorderManager counters (per-env rolling success).
+- Functions may return either a scalar (applied to all envs) or a tensor per env.
 """
 from __future__ import annotations
 from typing import Any, Optional
@@ -28,123 +29,154 @@ import isaaclab.envs.mdp as mdp
 _EPS = 1e-9
 
 
-def _success_rate(env: ManagerBasedRLEnv) -> float:
+def _get_success_rate(env: ManagerBasedRLEnv, env_ids: torch.Tensor) -> torch.Tensor:
     """
-    Global success rate across envs based on exported episode counts.
+    Returns per-env success rate in [0, 1]. Falls back to zeros if not available.
+
+    We read RecorderManager stats if present; else we approximate by using a decayed
+    moving-average of the 'success' termination flag stored in the env's extras.
     """
-    rec = env.recorder_manager
-    succ = rec.exported_successful_episode_count
-    fail = rec.exported_failed_episode_count
-    total = succ + fail
-    return float(succ / total) if total > 0 else 0.0
+    device = env.device if hasattr(env, "device") else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Preferred: recorder manager rolling success
+    if hasattr(env, "recorder") and env.recorder is not None:
+        # recorder exposes 'episode_success_rate' shaped (num_envs,)
+        rate = getattr(env.recorder, "episode_success_rate", None)
+        if isinstance(rate, torch.Tensor) and rate.numel() == env.num_envs:
+            return rate[env_ids].to(device)
+
+    # Fallback: extras flag averaged via a tiny EMA stored on env
+    if not hasattr(env, "_success_rate_ema"):
+        env._success_rate_ema = torch.zeros((env.num_envs,), dtype=torch.float32, device=device)
+    # read last-step success flags if present
+    flag = 0.0
+    if isinstance(env.extras, dict):
+        # common keys used in this project
+        if "is_success" in env.extras and isinstance(env.extras["is_success"], torch.Tensor):
+            s = env.extras["is_success"].to(device).float()
+            flag = s
+        elif "Episode_Termination/success" in env.extras and isinstance(env.extras["Episode_Termination/success"], torch.Tensor):
+            flag = env.extras["Episode_Termination/success"].to(device).float()
+    if not torch.is_tensor(flag):
+        flag = torch.zeros((env.num_envs,), dtype=torch.float32, device=device)
+    # EMA update with long memory
+    env._success_rate_ema = 0.995 * env._success_rate_ema + 0.005 * flag
+    return env._success_rate_ema[env_ids]
 
 
-def _throttle(env: ManagerBasedRLEnv, key: str, min_step_delta: int) -> bool:
+def _near_goal(env: ManagerBasedRLEnv, env_ids: torch.Tensor, pos_thresh_scale: float = 1.0) -> torch.Tensor:
     """
-    Return True if enough steps elapsed since last update under `key`.
+    Boolean mask per env for 'near goal'.
+
+    We use the current termination success thresholds if present:
+      - position_threshold (meters)
+      - orientation_threshold (radians)
+
+    Args:
+        pos_thresh_scale: multiply the current position threshold by this factor
+                          to define "near". e.g., 1.0 means same as success.
     """
-    if min_step_delta <= 0:
-        return True
-    step = int(getattr(env, "common_step_counter", 0))
-    last = getattr(env, key, None)
-    if last is None or step - int(last) >= int(min_step_delta):
-        setattr(env, key, step)
-        return True
-    return False
+    device = env.device if hasattr(env, "device") else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Current thresholds from term cfg if available
+    pos_thr = 0.05
+    ori_thr = 0.10
+    try:
+        pos_thr = float(env.termination_manager.cfg.success.params["position_threshold"])
+    except Exception:
+        pass
+    try:
+        ori_thr = float(env.termination_manager.cfg.success.params["orientation_threshold"])
+    except Exception:
+        pass
+    pos_thr = pos_thr * float(pos_thresh_scale)
+
+    # Acquire current pose error from extras if provided by rewards
+    pos_err = env.extras.get("Metrics/goal_pose/position_error", None) if isinstance(env.extras, dict) else None
+    ori_err = env.extras.get("Metrics/goal_pose/orientation_error", None) if isinstance(env.extras, dict) else None
+    if isinstance(pos_err, torch.Tensor) and isinstance(ori_err, torch.Tensor):
+        pos_ok = (pos_err.to(device).float()[env_ids] <= pos_thr)
+        ori_ok = (ori_err.to(device).float()[env_ids] <= ori_thr)
+        return pos_ok & ori_ok
+
+    # Fallback: treat none as far
+    return torch.zeros((len(env_ids),), dtype=torch.bool, device=device)
 
 
+def throttle(every_n_steps: int):
+    """
+    Decorator to restrict curriculum writes to every N common steps.
+    """
+    def _wrap(fn):
+        def _inner(env: ManagerBasedRLEnv, env_ids: torch.Tensor, *args, **kwargs):
+            step = getattr(env, "common_step_counter", 0)
+            if (step % max(1, int(every_n_steps))) != 0:
+                return mdp.modify_term_cfg.NO_CHANGE
+            return fn(env, env_ids, *args, **kwargs)
+        return _inner
+    return _wrap
+
+
+@throttle(every_n_steps=128)
 def success_linear(
     env: ManagerBasedRLEnv,
-    env_ids: Optional[torch.Tensor],
-    old_value: Any,
-    *,
+    env_ids: torch.Tensor,
     start_value: float,
     end_value: float,
     start_success: float,
     end_success: float,
-    clip: bool = True,
-    # update gating
-    min_step_delta: int = 0,
-    state_key: Optional[str] = None,
-) -> Any:
+    clamp: bool = True,
+) -> torch.Tensor | float:
     """
-    Linearly interpolate a parameter as success improves.
+    Linearly interpolate value vs success rate.
 
-    When success <= start_success -> start_value.
-    When success >= end_success -> end_value.
-    Else linear interpolation. Returns NO_CHANGE on tiny deltas or if throttled.
-
-    Args:
-        env: IsaacLab environment.
-        env_ids: Unused. Required by signature.
-        old_value: Current parameter value at `address`.
-        start_value, end_value: Range of parameter.
-        start_success, end_success: Range of success ∈ [0,1] mapped to values.
-        clip: Clamp success into [start_success, end_success].
-        min_step_delta: Minimum env steps between writes. 0 disables.
-        state_key: Optional throttle state name. Defaults to function name.
+    Returns per-env tensor V = lerp(start_value, end_value, t), where
+      t = clamp((S - start_success) / (end_success - start_success), 0, 1)
+    and S is the per-env success rate in [0,1].
     """
-    throttle_key = (state_key or "success_linear") + "_last_step"
-    if not _throttle(env, throttle_key, min_step_delta):
-        return mdp.modify_term_cfg.NO_CHANGE
-
-    s = _success_rate(env)
-    if clip and end_success > start_success:
-        s = min(max(s, start_success), end_success)
-    denom = max(_EPS, abs(end_success - start_success))
-    t = max(0.0, min(1.0, (s - start_success) / denom))
-    new_value = (1.0 - t) * float(start_value) + t * float(end_value)
-
-    if isinstance(old_value, (int, float)) and abs(float(old_value) - new_value) < 1e-6:
-        return mdp.modify_term_cfg.NO_CHANGE
-    return new_value
+    S = _get_success_rate(env, env_ids)
+    denom = max(_EPS, float(end_success - start_success))
+    t = (S - float(start_success)) / denom
+    if clamp:
+        t = torch.clamp(t, 0.0, 1.0)
+    return float(start_value) + (float(end_value) - float(start_value)) * t
 
 
+@throttle(every_n_steps=128)
 def success_toggle(
     env: ManagerBasedRLEnv,
-    env_ids: Optional[torch.Tensor],
-    old_value: Any,
-    *,
-    on_value: float | int,
-    off_value: float | int,
+    env_ids: torch.Tensor,
+    on_value: float,
+    off_value: float,
     threshold: float,
-    hysteresis: float = 0.02,
-    state_key: Optional[str] = None,
-    min_step_delta: int = 0,
-) -> Any:
+    hysteresis: float = 0.0,
+    state_key: str = "_curriculum_toggle_state",
+    near_goal_only: bool = False,
+    near_goal_scale: float = 1.0,
+) -> torch.Tensor | float:
     """
-    Select on/off value based on success with hysteresis. Throttled by steps.
+    ON/OFF based on success rate with optional hysteresis and 'near goal' gating.
 
-    Args:
-        env: IsaacLab environment.
-        env_ids: Unused.
-        old_value: Current parameter value at `address`.
-        on_value, off_value: Returned values.
-        threshold: Central threshold in [0,1].
-        hysteresis: Half-width of band to prevent flapping.
-        state_key: Base name for internal state on env.
-        min_step_delta: Min steps between potential writes.
+    - If near_goal_only=True, we only turn ON for envs currently near goal
+      under the scaled termination thresholds.
+    - Hysteresis: once ON, stays ON until success < (threshold - hysteresis).
     """
-    throttle_key = (state_key or "success_toggle") + "_last_step"
-    if not _throttle(env, throttle_key, min_step_delta):
-        return mdp.modify_term_cfg.NO_CHANGE
+    device = env.device if hasattr(env, "device") else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    S = _get_success_rate(env, env_ids)
 
-    s = _success_rate(env)
-    key = (state_key or "_curriculum_toggle_state")
-    state = getattr(env, key, None)
+    # persistent per-env state
+    if not hasattr(env, state_key):
+        setattr(env, state_key, torch.zeros((env.num_envs,), dtype=torch.bool, device=device))
+    state: torch.Tensor = getattr(env, state_key)
 
-    lo = max(0.0, threshold - hysteresis)
-    hi = min(1.0, threshold + hysteresis)
+    on_mask = S >= float(threshold)
+    off_mask = S < float(max(0.0, threshold - hysteresis))
+    # apply near-goal gating only to the ON transition
+    if near_goal_only:
+        on_mask &= _near_goal(env, env_ids, pos_thresh_scale=near_goal_scale)
 
-    if state is None:
-        state = s >= threshold
-    else:
-        state = bool(state)
-        state = (s >= lo) if state else (s >= hi)
+    # update state
+    state = state.clone()
+    state[env_ids] |= on_mask
+    state[env_ids] &= ~off_mask
+    setattr(env, state_key, state)
 
-    setattr(env, key, bool(state))
-    new_value = on_value if state else off_value
-
-    if isinstance(old_value, (int, float)) and abs(float(old_value) - float(new_value)) < 1e-12:
-        return mdp.modify_term_cfg.NO_CHANGE
-    return new_value
+    return torch.where(state[env_ids], torch.as_tensor(on_value, device=device), torch.as_tensor(off_value, device=device))

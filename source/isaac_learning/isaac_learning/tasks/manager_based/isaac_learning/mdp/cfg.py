@@ -234,11 +234,10 @@ class TerminationsCfg:
 ##
 
 
-@configclass
 class CurriculumCfg:
-    """Success-rate curricula mapped to your rewards/terminations."""
+    """Success-rate curricula mapped to rewards/terminations."""
 
-    # Tighten goal success threshold (termination)
+    # Tighten goal success threshold (termination) 0.05 → 0.005 as success 0.50 → 0.84
     tighten_goal_pos_threshold = CurriculumTermCfg(
         func=mdp.modify_term_cfg,
         params={
@@ -251,7 +250,7 @@ class CurriculumCfg:
         },
     )
 
-    # Keep success reward threshold in sync
+    # Keep success reward threshold in sync with termination threshold
     tighten_success_reward_threshold = CurriculumTermCfg(
         func=mdp.modify_term_cfg,
         params={
@@ -264,7 +263,7 @@ class CurriculumCfg:
         },
     )
 
-    # Action smoothness weight: 1e-4 → 1e-3 as success rises 0.0 → 0.2
+    # Action smoothness weight: 1e-4 → 1e-3 as success 0.0 → 0.2
     action_smoothness_weight = CurriculumTermCfg(
         func=mdp.modify_term_cfg,
         params={
@@ -290,7 +289,21 @@ class CurriculumCfg:
         },
     )
 
-    # Joint velocity weight: 0 → 0.5 as success 0.85 → 0.95
+    # Jerk penalty weight: 0 → 1e-12 as success 0.7 → 0.8
+    jerk_weight = CurriculumTermCfg(
+        func=mdp.modify_term_cfg,
+        params={
+            "address": "rewards.jerk_penalty.params.weight",
+            "modify_fn": curricula.success_linear,
+            "modify_params": {
+                "start_value": 0.0, "end_value": 1.0e-12,
+                "start_success": 0.7, "end_success": 0.8,
+            },
+        },
+    )
+
+    # Joint velocity penalty weight: 0 → 0.5 as success 0.85 → 0.95
+    # Toggle only when near goal to avoid early suppression of exploration.
     joint_vel_weight = CurriculumTermCfg(
         func=mdp.modify_term_cfg,
         params={
@@ -302,8 +315,21 @@ class CurriculumCfg:
             },
         },
     )
+    joint_vel_near_goal_toggle = CurriculumTermCfg(
+        func=mdp.modify_term_cfg,
+        params={
+            "address": "rewards.joint_vel_penalty.params.weight",
+            "modify_fn": curricula.success_toggle,
+            "modify_params": {
+                "on_value": 0.5, "off_value": 0.0,
+                "threshold": 0.85, "hysteresis": 0.03,
+                "state_key": "_joint_vel_penalty_on",
+                "near_goal_only": True, "near_goal_scale": 1.0,
+            },
+        },
+    )
 
-    # EE twist weight: 0 → 0.5 as success 0.85 → 0.95
+    # End-effector twist penalty weight: 0 → 0.5 as success 0.85 → 0.95
     ee_twist_weight = CurriculumTermCfg(
         func=mdp.modify_term_cfg,
         params={
@@ -315,8 +341,21 @@ class CurriculumCfg:
             },
         },
     )
+    ee_twist_near_goal_toggle = CurriculumTermCfg(
+        func=mdp.modify_term_cfg,
+        params={
+            "address": "rewards.ee_twist_penalty.params.weight",
+            "modify_fn": curricula.success_toggle,
+            "modify_params": {
+                "on_value": 0.5, "off_value": 0.0,
+                "threshold": 0.85, "hysteresis": 0.03,
+                "state_key": "_ee_twist_penalty_on",
+                "near_goal_only": True, "near_goal_scale": 1.0,
+            },
+        },
+    )
 
-    # Upright bonus weight: 1.0 → 0.0 as success 0.0 → 0.4
+    # Upright bonus fades out: 1.0 → 0.0 as success 0.0 → 0.4
     upright_bonus_weight = CurriculumTermCfg(
         func=mdp.modify_term_cfg,
         params={
