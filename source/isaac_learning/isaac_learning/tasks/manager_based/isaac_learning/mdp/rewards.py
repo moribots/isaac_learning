@@ -115,6 +115,23 @@ def ee_stay_up_reward(
 # Penalties
 # -------------------------
 
+
+def joint_pos_barrier_penalty(env, robot_cfg, weight: float, margin):
+    """
+    Activates inside 'margin' radians from either joint limit.
+    Returns sum_j [ ReLU(margin - (q_j - q_lo_j)) + ReLU(margin - (q_hi_j - q_j)) ].
+    """
+    robot = env.scene[robot_cfg.name]
+    q = robot.data.joint_pos[:, robot_cfg.joint_ids]
+    lo = robot.data.joint_pos_limits[:, 0][..., robot_cfg.joint_ids]  # or your FRANKA_* arrays
+    hi = robot.data.joint_pos_limits[:, 1][..., robot_cfg.joint_ids]
+
+    d_lo = q - lo
+    d_hi = hi - q
+    pen = torch.nn.functional.relu(margin - d_lo) + torch.nn.functional.relu(margin - d_hi)
+    return -weight * pen.sum(dim=1)
+
+
 def joint_vel_penalty(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg,

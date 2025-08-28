@@ -142,6 +142,20 @@ class RewardsCfg:
         params={"robot_cfg": mdp.SceneEntityCfg("robot"), "weight": 1.0},
     )
 
+    joint_pos_barrier_penalty = RewardTermCfg(
+        func=rewards.joint_pos_barrier_penalty,
+        weight=1.0,
+        params={
+            "robot_cfg": mdp.SceneEntityCfg("robot"),
+            "margin": 0.15,
+            "weight": 1.0
+        },
+    )
+
+            "weight": 0.5
+        },
+    )
+
     joint_acc_penalty = RewardTermCfg(
         func=rewards.joint_acc_penalty,
         weight=1.0e-6,
