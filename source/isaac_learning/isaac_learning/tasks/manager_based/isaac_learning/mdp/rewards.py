@@ -51,10 +51,10 @@ def _goal_pos(env: ManagerBasedRLEnv) -> torch.Tensor:
 # Primary rewards
 # -------------------------
 
-def ee_pos_tracking_reward(
+def ee_pos_tracking_penalty(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg,
-    weight: float = 1.0,
+    weight: float,
 ) -> torch.Tensor:
     """
     Negative L2 distance between end-effector and goal.
@@ -66,13 +66,13 @@ def ee_pos_tracking_reward(
     ee_pos = robot.data.body_pos_w[:, idx]  # (N,3)
     tgt_pos = _goal_pos(env)                # (N,3)
     dist = torch.norm(ee_pos - tgt_pos, dim=1)
-    return -dist
+    return -weight * dist
 
 
-def ee_quat_tracking_reward(
+def ee_quat_tracking_penalty(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg,
-    weight: float = 1.0,
+    weight: float,
 ) -> torch.Tensor:
     """
     Quaternion alignment reward in [0, 1], 1 at perfect alignment.
@@ -91,13 +91,13 @@ def ee_quat_tracking_reward(
     q_goal = torch.nn.functional.normalize(q_goal, dim=1)
     # Ambiguity q ~ -q handled by square
     dot = torch.sum(q_ee * q_goal, dim=1).abs()
-    return dot * dot
+    return -weight * (dot * dot)
 
 
 def ee_stay_up_reward(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg,
-    weight: float = 1.0,
+    weight: float,
     upright_threshold: float = 0.10,
 ) -> torch.Tensor:
     """
@@ -118,7 +118,7 @@ def ee_stay_up_reward(
 def joint_vel_penalty(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg,
-    weight: float = 1.0,
+    weight: float,
     dist_threshold: float = 0.2,
     max_scale: float = 4.0,
 ) -> torch.Tensor:
@@ -148,13 +148,13 @@ def joint_vel_penalty(
         scale = scale.clone()
         scale[mask] = scale_in
 
-    return -base * scale
+    return -weight * base * scale
 
 
 def joint_vel_limit_exceed_penalty(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg,
-    weight: float = 1.0,
+    weight: float,
 ) -> torch.Tensor:
     """
     Penalize only when joint velocity exceeds per-joint limits:
@@ -172,13 +172,13 @@ def joint_vel_limit_exceed_penalty(
         if dq_lim is None:
             return torch.zeros(dq.shape[0], device=dq.device)
     over = torch.nn.functional.relu(dq - dq_lim)
-    return -over.sum(dim=1)
+    return -weight * over.sum(dim=1)
 
 
 def joint_acc_penalty(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg,
-    weight: float = 1.0,
+    weight: float,
 ) -> torch.Tensor:
     """
     Penalize joint acceleration magnitude: -||ddq||_2.
@@ -187,13 +187,13 @@ def joint_acc_penalty(
     """
     robot = _get_robot(env, robot_cfg)
     ddq = robot.data.joint_acc  # (N,DoF)
-    return -torch.norm(ddq, dim=1)
+    return -weight * torch.norm(ddq, dim=1)
 
 
 def ee_twist_penalty(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg,
-    weight: float = 1.0,
+    weight: float,
 ) -> torch.Tensor:
     """
     Penalize end-effector spatial velocity magnitude:
@@ -203,12 +203,12 @@ def ee_twist_penalty(
     idx = _ee_body_index(robot, robot_cfg.body_names[0])
     v_lin = robot.data.body_lin_vel_w[:, idx]
     v_ang = robot.data.body_ang_vel_w[:, idx]
-    return -(torch.norm(v_lin, dim=1) + torch.norm(v_ang, dim=1))
+    return -weight * (torch.norm(v_lin, dim=1) + torch.norm(v_ang, dim=1))
 
 
 def action_smoothness_penalty(
     env: ManagerBasedRLEnv,
-    weight: float = 1.0,
+    weight: float,
 ) -> torch.Tensor:
     """
     Penalize action delta: -||a_t - a_{t-1}||_2.
@@ -217,14 +217,14 @@ def action_smoothness_penalty(
     """
     a_t = env.action_manager.action  # (N, A)
     a_prev = env.action_manager.prev_action  # (N, A)
-    return -torch.norm(a_t - a_prev, dim=1)
+    return -weight * torch.norm(a_t - a_prev, dim=1)
 
 # -------------------------
 # Success and Termination Rewards
 # -------------------------
 
 
-def success_bonus(env: ManagerBasedRLEnv, threshold: float) -> torch.Tensor:
+def success_bonus(env: ManagerBasedRLEnv, threshold: float, weight: float) -> torch.Tensor:
     """
     Returns 1.0 for each environment where the end-effector is within
     `threshold` meters of the current goal position, else 0.0.
@@ -235,7 +235,7 @@ def success_bonus(env: ManagerBasedRLEnv, threshold: float) -> torch.Tensor:
     goal_cmd = env.command_manager.get_command("goal_pose")  # (N, 7)
     goal_pos = goal_cmd[..., :3]
     dist = torch.norm(ee_pos - goal_pos, dim=1)
-    return (dist < threshold).float()
+    return weight * (dist < threshold).float()
 
 
 def collision_penalty(
@@ -246,4 +246,4 @@ def collision_penalty(
 ) -> torch.Tensor:
     """Per-env penalty: −weight where any illegal contact is present, else 0."""
     mask = illegal_contact(env, threshold, sensor_cfg)
-    return -mask.to(dtype=torch.float32)
+    return -weight * mask.to(dtype=torch.float32)

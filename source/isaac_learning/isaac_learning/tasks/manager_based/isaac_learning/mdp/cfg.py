@@ -106,21 +106,21 @@ class RewardsCfg:
     """Reward terms for the MDP."""
 
     # Task shaping
-    ee_pos_tracking_reward = RewardTermCfg(
-        func=rewards.ee_pos_tracking_reward,
+    ee_pos_tracking_penalty = RewardTermCfg(
+        func=rewards.ee_pos_tracking_penalty,
         weight=2.5,
-        params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])},
+        params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"]), "weight": 2.5},
     )
     # Keep orientation reward in Isaac
-    ee_quat_tracking_reward = RewardTermCfg(
-        func=rewards.ee_quat_tracking_reward,
+    ee_quat_tracking_penalty = RewardTermCfg(
+        func=rewards.ee_quat_tracking_penalty,
         weight=1.0,
-        params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])},
+        params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"]), "weight": 1.0},
     )
     ee_stay_up_reward = RewardTermCfg(
         func=rewards.ee_stay_up_reward,
         weight=1.0,
-        params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])},
+        params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"]), "weight": 1.0},
     )
 
     # Penalties
@@ -132,35 +132,36 @@ class RewardsCfg:
             "robot_cfg": mdp.SceneEntityCfg("robot"),
             "dist_threshold": 0.2,
             "max_scale": 4.0,
+            "weight": 0.5
         },
     )
     # 2) Additional penalty only for over-limit velocity
     joint_vel_limit_exceed_penalty = RewardTermCfg(
         func=rewards.joint_vel_limit_exceed_penalty,
-        weight=0.01,  # small to avoid changing Genesis balance
-        params={"robot_cfg": mdp.SceneEntityCfg("robot")},
+        weight=1.0,  # small to avoid changing Genesis balance
+        params={"robot_cfg": mdp.SceneEntityCfg("robot"), "weight": 1.0},
     )
 
     joint_acc_penalty = RewardTermCfg(
         func=rewards.joint_acc_penalty,
         weight=1.0e-6,
-        params={"robot_cfg": mdp.SceneEntityCfg("robot")},
+        params={"robot_cfg": mdp.SceneEntityCfg("robot"), "weight": 1.0e-6},
     )
     ee_twist_penalty = RewardTermCfg(
         func=rewards.ee_twist_penalty,
         weight=0.5,
-        params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"])},
+        params={"robot_cfg": mdp.SceneEntityCfg("robot", body_names=["panda_hand"]), "weight": 0.5},
     )
     action_smoothness_penalty = RewardTermCfg(
         func=rewards.action_smoothness_penalty,
-        weight=1.0e-3,
+        weight=1.0e-3, params={"weight": 1.0e-3},
     )
 
     # Success and collisions
     success_reward = RewardTermCfg(
         func=rewards.success_bonus,
         weight=200.0,
-        params={"threshold": 0.05},
+        params={"threshold": 0.05, "weight": 200.0},
     )
     collision_penalty = RewardTermCfg(
         func=rewards.collision_penalty,
