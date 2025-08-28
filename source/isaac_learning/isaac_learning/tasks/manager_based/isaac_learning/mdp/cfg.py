@@ -152,10 +152,6 @@ class RewardsCfg:
         },
     )
 
-            "weight": 0.5
-        },
-    )
-
     joint_acc_penalty = RewardTermCfg(
         func=rewards.joint_acc_penalty,
         weight=1.0e-6,
