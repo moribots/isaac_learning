@@ -231,7 +231,7 @@ class TerminationsCfg:
         params={
             "robot_cfg": SceneEntityCfg(name="robot", body_names=["panda_hand"]),
             "position_threshold": 0.05,
-            "orientation_threshold": 0.10,   # radians
+            "orientation_threshold": 1.0,   # radians
         }
     )
 
@@ -253,6 +253,19 @@ class CurriculumCfg:
             "modify_params": {
                 "start_value": 0.05, "end_value": 0.005,
                 "start_success": 0.50, "end_success": 0.84,
+            },
+        },
+    )
+
+    # Tighten goal success threshold (termination) 0.05 → 0.005 as success 0.50 → 0.84
+    tighten_goal_ori_threshold = CurriculumTermCfg(
+        func=mdp.modify_term_cfg,
+        params={
+            "address": "terminations.success.params.position_threshold",
+            "modify_fn": curricula.success_linear,
+            "modify_params": {
+                "start_value": 1.0, "end_value": 0.1,
+                "start_success": 0.70, "end_success": 0.9,
             },
         },
     )
