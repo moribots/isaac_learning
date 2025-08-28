@@ -146,7 +146,7 @@ class RewardsCfg:
         func=rewards.joint_pos_barrier_penalty,
         weight=1.0,
         params={
-            "robot_cfg": mdp.SceneEntityCfg("robot"),
+            "robot_cfg": SceneEntityCfg(name="robot", joint_names=[r"panda_joint[1-7]"]),
             "margin": 0.15,
             "weight": 1.0
         },

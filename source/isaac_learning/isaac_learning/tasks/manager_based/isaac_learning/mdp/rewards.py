@@ -116,20 +116,45 @@ def ee_stay_up_reward(
 # -------------------------
 
 
-def joint_pos_barrier_penalty(env, robot_cfg, weight: float, margin):
-    """
-    Activates inside 'margin' radians from either joint limit.
-    Returns sum_j [ ReLU(margin - (q_j - q_lo_j)) + ReLU(margin - (q_hi_j - q_j)) ].
-    """
+# rewards.py  — replace joint_pos_barrier_penalty with:
+
+def joint_pos_barrier_penalty(env, robot_cfg, margin: float, weight: float):
     robot = env.scene[robot_cfg.name]
-    q = robot.data.joint_pos[:, robot_cfg.joint_ids]
-    lo = robot.data.joint_pos_limits[:, 0][..., robot_cfg.joint_ids]  # or your FRANKA_* arrays
-    hi = robot.data.joint_pos_limits[:, 1][..., robot_cfg.joint_ids]
+    device = robot.data.joint_pos.device
+
+    # Resolve 7-DOF indices robustly
+    if getattr(robot_cfg, "joint_ids", None) is None or len(robot_cfg.joint_ids) == 0:
+        arm_names = [f"panda_joint{i}" for i in range(1, 8)]
+        joint_ids = torch.tensor([robot.joint_names.index(n) for n in arm_names],
+                                 device=device, dtype=torch.long)
+    else:
+        joint_ids = torch.as_tensor(robot_cfg.joint_ids, device=device, dtype=torch.long)
+
+    # Current positions: (N, 7)
+    q = robot.data.joint_pos[:, joint_ids]
+
+    # Limits: support (DoF,2) or (N,DoF,2)
+    jlim = getattr(robot.data, "joint_pos_limits", None)
+    if jlim is not None:
+        if jlim.ndim == 2:             # (DoF, 2)
+            lo = jlim[joint_ids, 0].unsqueeze(0).expand_as(q)
+            hi = jlim[joint_ids, 1].unsqueeze(0).expand_as(q)
+        else:                           # (N, DoF, 2)
+            lo = jlim[:, joint_ids, 0]
+            hi = jlim[:, joint_ids, 1]
+    else:
+        # Fallback to constants
+        from ..config.franka.franka_cfg import (
+            FRANKA_JOINT_POSITION_LIMITS_MIN as LMIN,
+            FRANKA_JOINT_POSITION_LIMITS_MAX as LMAX,
+        )
+        lo = LMIN.to(device)[joint_ids].unsqueeze(0).expand_as(q)
+        hi = LMAX.to(device)[joint_ids].unsqueeze(0).expand_as(q)
 
     d_lo = q - lo
     d_hi = hi - q
-    pen = torch.nn.functional.relu(margin - d_lo) + torch.nn.functional.relu(margin - d_hi)
-    return -weight * pen.sum(dim=1)
+    pen = torch.relu(margin - d_lo) + torch.relu(margin - d_hi)   # (N,7)
+    return -weight * pen.sum(dim=1)                                         # unsigned magnitude
 
 
 def joint_vel_penalty(
